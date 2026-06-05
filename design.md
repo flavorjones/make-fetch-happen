@@ -101,3 +101,7 @@ Minimal dashboard showing:
 - Comment format for activity updates
 - Whether to tag cards automatically (e.g., with repo name)
 - How to handle notification volume / filtering
+
+## Fizzy
+
+Read @fizzy.md to understand how we are using Fizzy cards.
