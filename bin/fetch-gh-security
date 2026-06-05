@@ -1,0 +1,76 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Turn new GitHub security-advisory notifications into golden Fizzy cards.
+#
+# Finds unread notifications that are repository security advisories (a new
+# report, not a comment), creates a golden, tagged Fizzy card for each, and
+# marks the notification done so it isn't processed again.
+
+require "json"
+require "open3"
+require "fizzy"
+
+ACCOUNT = "6097036"
+BOARD   = "03f3qct6t4hsg76apuu1jea6w"
+COLUMN  = "maybe"
+TAGS    = %w[oss security].freeze
+
+def gh_api(*args)
+  command = ["gh", "api", *args]
+  puts "API: #{command}"
+  response, status = Open3.capture2e(*command)
+  raise "gh api failed: #{response}" unless status.success?
+  response.strip.empty? ? nil : JSON.parse(response)
+end
+
+token = `op read --account my.1password.com "op://Private/app.fizzy.do API key/password"`.strip
+abort "could not read Fizzy token from 1Password" if token.empty?
+
+fizzy = Fizzy.client(access_token: token, base_url: "https://app.fizzy.do")
+
+count = 0
+before = nil
+
+loop do
+  query = "/notifications?per_page=50"
+  query += "&before=#{before}" if before
+  batch = gh_api(query)
+  break if batch.empty?
+
+  # Page by a time cursor, not page number: marking notifications done shrinks
+  # the inbox, which would shift page-number offsets and skip items.
+  before = batch.last["updated_at"]
+
+  advisories = batch.select do |n|
+    n.dig("subject", "type") == "RepositoryAdvisory" && n["reason"] == "assign"
+  end
+
+  advisories.each do |n|
+    repo      = n.dig("repository", "full_name")
+    title     = n.dig("subject", "title")
+    thread_id = n["id"]
+
+    card_title  = "#{repo.split('/').last}: #{title}"
+    rel         = "https://github.com/#{repo}/security/advisories"
+    description = "<table><tr><td>rel</td><td>#{rel}</td></tr></table>"
+
+    card = fizzy.cards.create(
+      account_id:  ACCOUNT,
+      board_id:    BOARD,
+      column_id:   COLUMN,
+      title:       card_title,
+      description: description,
+      tag_names:   TAGS
+    )
+    fizzy.cards.gold(account_id: ACCOUNT, card_number: card["number"])
+
+    # Mark the notification done so it isn't processed again.
+    gh_api("-X", "DELETE", "/notifications/threads/#{thread_id}")
+
+    count += 1
+    puts "carded ##{card["number"]}: #{card_title}"
+  end
+end
+
+puts "done (#{count} advisories)"
