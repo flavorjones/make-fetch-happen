@@ -1,11 +1,13 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# Turn new GitHub security-advisory notifications into golden Fizzy cards.
+# Turn GitHub security-advisory notifications into golden Fizzy cards.
 #
-# Finds unread notifications that are repository security advisories (a new
-# report, not a comment), creates a golden, tagged Fizzy card for each, and
-# marks the notification done so it isn't processed again.
+# Finds unread notifications that are repository security advisories. A report
+# without an existing card becomes a new golden, tagged card; activity on a
+# report that already has a card adds a comment to that card instead of
+# creating a duplicate. Either way the notification is marked done so it isn't
+# processed again.
 
 require "json"
 require "open3"
@@ -40,10 +42,15 @@ loop do
 
   # Page by a time cursor, not page number: marking notifications done shrinks
   # the inbox, which would shift page-number offsets and skip items.
-  before = batch.last["updated_at"]
+  oldest = batch.last["updated_at"]
+
+  # Past its served window GitHub stops honoring `before` and replays recent
+  # notifications, so the cursor stops moving backward. That's the real end.
+  break if before && oldest >= before
+  before = oldest
 
   advisories = batch.select do |n|
-    n.dig("subject", "type") == "RepositoryAdvisory" && n["reason"] == "assign"
+    n.dig("subject", "type") == "RepositoryAdvisory"
   end
 
   advisories.each do |n|
@@ -51,25 +58,40 @@ loop do
     title     = n.dig("subject", "title")
     thread_id = n["id"]
 
-    card_title  = "#{repo.split('/').last}: #{title}"
-    rel         = "https://github.com/#{repo}/security/advisories"
-    description = "<table><tr><td>rel</td><td>#{rel}</td></tr></table>"
+    card_title = "#{repo.split('/').last}: #{title}"
 
-    card = fizzy.cards.create(
-      account_id:  ACCOUNT,
-      board_id:    BOARD,
-      column_id:   COLUMN,
-      title:       card_title,
-      description: description,
-      tag_names:   TAGS
-    )
-    fizzy.cards.gold(account_id: ACCOUNT, card_number: card["number"])
+    existing = fizzy.cards.list(account_id: ACCOUNT, board_ids: [BOARD])
+                    .find { |c| c["title"] == card_title }
+
+    if existing
+      fizzy.comments.create(
+        account_id:  ACCOUNT,
+        card_number: existing["number"],
+        body:        "<p>Someone commented on the report.</p>"
+      )
+      puts "commented ##{existing["number"]}: #{card_title}"
+    else
+      rel         = "https://github.com/#{repo}/security/advisories"
+      description = "<table><tr><td>rel</td><td>#{rel}</td></tr></table>"
+
+      card = fizzy.cards.create(
+        account_id:  ACCOUNT,
+        board_id:    BOARD,
+        column_id:   COLUMN,
+        title:       card_title,
+        description: description
+      )
+      TAGS.each do |tag|
+        fizzy.cards.tag(account_id: ACCOUNT, card_number: card["number"], tag_title: tag)
+      end
+      fizzy.cards.gold(account_id: ACCOUNT, card_number: card["number"])
+      puts "carded ##{card["number"]}: #{card_title}"
+    end
 
     # Mark the notification done so it isn't processed again.
     gh_api("-X", "DELETE", "/notifications/threads/#{thread_id}")
 
     count += 1
-    puts "carded ##{card["number"]}: #{card_title}"
   end
 end
 
