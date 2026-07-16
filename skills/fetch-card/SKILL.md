@@ -19,6 +19,9 @@ triggers:
   - update the frontmatter
   - set the output
   - record the worktree
+  # Chronicling progress
+  - chronicle
+  - journal
 ---
 
 # fetch-card
@@ -70,6 +73,16 @@ When updating an existing card, preserve the description's existing HTML structu
     fizzy card update NUMBER --description_file path.html
 
 Typical lifecycle: a card is created with "ref"; "worktree" is added when work starts; "output" is added when a pull request goes up for review.
+
+## Chronicling
+
+"Chronicle" or "journal" means: add a comment to the card. Nothing else. It never
+means editing the description.
+
+A chronicle comment summarizes the state of the work so it can be picked up later in
+a different session: what was decided and why, what was built, what's parked, and
+what the next step is. Attach a code or diff snapshot when the working tree is about
+to change.
 
 ## State
 
