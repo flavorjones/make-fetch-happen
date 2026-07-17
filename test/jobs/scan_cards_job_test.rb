@@ -59,6 +59,6 @@ class ScanCardsJobTest < ActiveJob::TestCase
       ScanCardsJob.perform_now
     end
 
-    assert_equal [1], Card.pluck(:fizzy_card_number)
+    assert_equal [ 1 ], Card.pluck(:fizzy_card_number)
   end
 end

@@ -3,7 +3,7 @@ class ScanCardsJob < ApplicationJob
     fizzy = FizzyClient.build
     seen_numbers = []
 
-    fizzy.cards.list(account_id: FizzyClient.account_id, board_ids: [FizzyClient.board_id]).each do |card_hash|
+    fizzy.cards.list(account_id: FizzyClient.account_id, board_ids: [ FizzyClient.board_id ]).each do |card_hash|
       artifact_url = Card.extract_artifact_url(card_hash["description_html"])
       next unless artifact_url
 
