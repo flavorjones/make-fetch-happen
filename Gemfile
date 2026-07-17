@@ -65,4 +65,6 @@ group :test do
   # Use system testing [https://guides.rubyonrails.org/testing.html#system-testing]
   gem "capybara"
   gem "selenium-webdriver"
+  # Restores Object#stub, dropped from minitest core in minitest 6 [https://github.com/seattlerb/minitest-mock]
+  gem "minitest-mock"
 end
