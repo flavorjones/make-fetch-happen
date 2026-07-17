@@ -15,5 +15,6 @@ class ArtifactUrlTest < ActiveSupport::TestCase
     assert_nil ArtifactUrl.normalize(nil)
     assert_nil ArtifactUrl.normalize("  ")
     assert_nil ArtifactUrl.normalize("not a url")
+    assert_nil ArtifactUrl.normalize("mailto:foo@bar.com")
   end
 end
