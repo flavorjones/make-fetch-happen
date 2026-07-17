@@ -7,9 +7,13 @@ class ScanCardsJob < ApplicationJob
       artifact_url = Card.extract_artifact_url(card_hash["description_html"])
       next unless artifact_url
 
-      card = Card.find_or_initialize_by(fizzy_card_number: card_hash["number"])
-      card.update!(artifact_url: artifact_url, title: card_hash["title"])
-      seen_numbers << card_hash["number"]
+      begin
+        card = Card.find_or_initialize_by(fizzy_card_number: card_hash["number"])
+        card.update!(artifact_url: artifact_url, title: card_hash["title"])
+        seen_numbers << card_hash["number"]
+      rescue ActiveRecord::RecordInvalid
+        next
+      end
     end
 
     Card.where.not(fizzy_card_number: seen_numbers).destroy_all

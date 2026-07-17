@@ -49,6 +49,21 @@ class ScanCardsJobTest < ActiveJob::TestCase
     assert_equal "new title", Card.first.title
   end
 
+  test "skips a card whose artifact url duplicates an earlier card and still completes the scan" do
+    Card.create!(artifact_url: "https://github.com/a/b/issues/9", fizzy_card_number: 9, title: "stale")
+    fizzy = fizzy_returning([
+      card_hash(number: 1, title: "first", ref: "https://github.com/a/b/issues/1"),
+      card_hash(number: 2, title: "dupe", ref: "https://github.com/a/b/issues/1")
+    ])
+
+    FizzyClient.stub :build, fizzy do
+      ScanCardsJob.perform_now
+    end
+
+    assert_equal [ 1 ], Card.pluck(:fizzy_card_number)
+    assert_equal "first", Card.find_by(fizzy_card_number: 1).title
+  end
+
   test "deletes index rows for cards that no longer appear" do
     Card.create!(artifact_url: "https://github.com/a/b/issues/9", fizzy_card_number: 9, title: "gone")
     fizzy = fizzy_returning([
