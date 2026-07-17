@@ -1,0 +1,19 @@
+<h1>Card index (<%= @cards.total_count %>)</h1>
+
+<table>
+  <thead>
+    <tr><th>Fizzy #</th><th>Title</th><th>Artifact</th><th>Updated</th></tr>
+  </thead>
+  <tbody>
+    <% @cards.each do |card| %>
+      <tr>
+        <td><%= card.fizzy_card_number %></td>
+        <td><%= card.title %></td>
+        <td><%= link_to card.artifact_url, card.artifact_url %></td>
+        <td><%= card.updated_at %></td>
+      </tr>
+    <% end %>
+  </tbody>
+</table>
+
+<%= paginate @cards %>
