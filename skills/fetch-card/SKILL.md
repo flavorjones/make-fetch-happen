@@ -105,6 +105,29 @@ fizzy comment create --card NUMBER --body_file tmp/comment.html
 `--unsafe` preserves raw HTML in the source, so `<action-text-attachment>` tags survive the
 conversion. The same applies to `fizzy comment update`.
 
+### Drafts posted for approval
+
+A draft that Mike will approve and then send somewhere else — a GitHub or advisory
+comment, a release note, an email — is *content*, not prose for the card. Wrap it in
+`<pre><code>` … `</code></pre>` so it reaches him verbatim. Without the wrapper
+`cmark-gfm` renders it, and he approves HTML he never wrote — the headings, links, and
+emphasis he sees are not the markdown that gets posted.
+
+Escape `&`, `<`, and `>` inside the wrapper. `--unsafe` passes raw HTML straight
+through, so an unescaped tag in the draft renders instead of showing.
+
+```
+Draft reply for GHSA-627c-837f-8529 — approve and I'll post it:
+
+<pre><code>## Assessment
+
+Confirmed on `v2.14.0`. See &lt;https://example.com/poc&gt;.
+</code></pre>
+```
+
+Keep your own framing (what the draft is, where it would go, what you need) as ordinary
+markdown outside the wrapper.
+
 ## Chronicling
 
 "Chronicle" or "journal" means: add a comment to the card. Nothing else. It never
