@@ -88,13 +88,19 @@ path is up and the webhook is registered. If it aborted instead (no admin
 profile, wrong role, funnel failure, board not found), the reason is on stderr in
 the task's output file; surface it and stop.
 
-**c. Catch up.** Nothing is replayed on start. Check the tray for mentions that
-arrived while nobody was watching and handle them as events:
+**c. Missed events arrive first.** Anything that happened while nothing was
+listening is replayed before `READY`, as ordinary `MENTION` / `TRANSITION`
+lines: the script reads the board's activity feed back to the newest event it
+saw last time (remembered in `~/.config/fizzy/fetch-last.json`) and runs those
+events through the same filters as live deliveries. Handle them exactly like
+live events — verify, then dispatch. Several moves of one card come out as
+several lines; corroboration (below) makes you act on the card's current state
+once.
+
+The very first run has no mark and replays nothing. For that case only, check
+the tray for unread mentions and handle them by hand:
 
     fizzy notification tray --jq '.data[] | select(.source_type == "mention") | {id, card: .card.number, body}'
-
-Transitions missed while down are not recoverable from the tray; the board's
-current state is what it is.
 
 ## Trust model — verify before dispatching
 
@@ -314,7 +320,8 @@ down basecamp-connect's funnel.
 | `READY` printed but no events arrive | Deliveries failing | `fizzy webhook deliveries --board "$BOARD" ID --profile mike_37signals_com` shows each delivery's response; check the funnel path is still up |
 | A comment or reaction posted as Mike | `FIZZY_PROFILE` not exported, or not passed to the handler | `export FIZZY_PROFILE=fetchbot`; put it in every handler's brief |
 | Events stopped mid-session | Something ran `tailscale funnel reset` (e.g. basecamp-connect's teardown) | Restart `bin/fetch-watch`; it re-adds its path |
-| Mention arrived while nobody was watching | No replay on start | Check the tray at startup (watcher step c) |
+| An event from while nobody was watching never showed up | First run (no mark file), or the mark file was deleted | Check the tray for unread mentions; transitions before the first run are not recoverable |
+| Old events replayed on every start | Mark file not writable | Check `~/.config/fizzy/fetch-last.json`; the script prints the write failure on stderr |
 | Watching session stops seeing events | Did the work inline instead of dispatching | Prepare and dispatch only; the subagent does the work |
 | Two agents fighting over one worktree | Second event on a card dispatched a second agent | `SendMessage` the running `card-NUMBER` agent instead |
 | Agent works in the wrong checkout | Working directory left to the agent to figure out | Resolve repo and worktree before dispatch, and name the directory in the brief |

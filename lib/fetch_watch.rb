@@ -1,5 +1,7 @@
+require "fileutils"
 require "json"
 require "openssl"
+require "time"
 
 # Turns signed Fizzy webhook deliveries into the one-line events bin/fetch-watch
 # prints for the fetch-monitor skill:
@@ -7,8 +9,9 @@ require "openssl"
 #   MENTION card=<number> comment=<id> by="<creator>"
 #   TRANSITION card=<number> state="<state>" by="<creator>"
 #
-# Everything here is pure: no network, no shelling out. The runtime plumbing
-# (funnel, webhook registration, HTTP server) lives in bin/fetch-watch.
+# Nothing here touches the network or shells out; the only side effect is the
+# mark file. The runtime plumbing (funnel, webhook registration, HTTP server,
+# activity-feed paging) lives in bin/fetch-watch.
 module FetchWatch
   Identity = Data.define(:id, :name) do
     def first_name
@@ -38,6 +41,7 @@ module FetchWatch
 
     def id = @payload["id"]
     def action = @payload["action"]
+    def created_at = @payload["created_at"]&.then { Time.iso8601(it) }
     def creator_id = @payload.dig("creator", "id")
     def creator_name = @payload.dig("creator", "name")
     def comment_id = eventable["id"]
@@ -55,14 +59,19 @@ module FetchWatch
       end
     end
 
-    # "Done" and "Not Now" are flags on the card, not columns, and a card keeps
-    # its last column when it enters either -- so check the flags first.
+    # The action says where the card went. The card payload only says where
+    # it is now, which differs for a replayed event -- so consult it only for
+    # actions that don't name a destination. "Done" and "Not Now" are flags on
+    # the card, not columns, and a card keeps its last column when it enters
+    # either, so the flags win over the column.
     def card_state
-      return "Done" if eventable["closed"]
-      return "Not Now" if eventable["postponed"]
-
-      column = eventable.dig("column", "name")
-      column.nil? || column.empty? ? "Maybe?" : column
+      case action
+      when "card_closed" then "Done"
+      when "card_postponed", "card_auto_postponed" then "Not Now"
+      when "card_sent_back_to_triage" then "Maybe?"
+      when "card_triaged" then @payload.dig("particulars", "column") || current_column
+      else current_state
+      end
     end
 
     # Rendered mention attachments carry the mentioned user's avatar URL, which
@@ -79,29 +88,54 @@ module FetchWatch
       def eventable
         @payload.fetch("eventable", {})
       end
+
+      def current_state
+        return "Done" if eventable["closed"]
+        return "Not Now" if eventable["postponed"]
+
+        current_column
+      end
+
+      def current_column
+        column = eventable.dig("column", "name")
+        column.nil? || column.empty? ? "Maybe?" : column
+      end
   end
 
   class Pipeline
-    def initialize(identity:, secret:, log: $stderr)
+    def initialize(identity:, secret:, mark: Mark.new, log: $stderr)
       @identity = identity
       @secret = secret
+      @mark = mark
       @log = log
       @seen = Set.new
     end
 
+    # A signed webhook delivery.
     def process(body:, signature:)
       return log("rejected: bad signature") unless Signature.valid?(body: body, signature: signature, secret: @secret)
 
-      event = Event.new(JSON.parse(body))
-      return log("ignored #{event.id}: already delivered") unless @seen.add?(event.id)
-      return log("ignored #{event.id}: own #{event.action}") if event.creator_id == @identity.id
-
-      line_for(event)
+      handle(Event.new(JSON.parse(body)))
     rescue JSON::ParserError
       log("rejected: malformed payload")
     end
 
+    # An event read back from the board's activity feed, which is already
+    # authenticated by the API call that fetched it.
+    def replay(payload)
+      handle(Event.new(payload))
+    end
+
     private
+      def handle(event)
+        @mark.record(event)
+        @mark.save
+        return log("ignored #{event.id}: already delivered") unless @seen.add?(event.id)
+        return log("ignored #{event.id}: own #{event.action}") if event.creator_id == @identity.id
+
+        line_for(event)
+      end
+
       def line_for(event)
         if event.comment?
           return log("ignored #{event.id}: comment without mention") unless event.mentions?(@identity)
@@ -117,6 +151,92 @@ module FetchWatch
       def log(message)
         @log.puts(message)
         nil
+      end
+  end
+
+  # Where the watcher left off, so a restart can replay what the board's
+  # activity feed saw in the meantime. Events are timestamped to the
+  # millisecond, so the recent ids disambiguate events sharing the newest
+  # instant.
+  class Mark
+    RECENT_IDS = 100
+
+    def self.load(path)
+      state = JSON.parse(File.read(path))
+      new(path: path, last_event_at: state["last_event_at"]&.then { Time.iso8601(it) }, recent_ids: state.fetch("recent_ids", []))
+    rescue Errno::ENOENT, JSON::ParserError
+      new(path: path)
+    end
+
+    def initialize(path: nil, last_event_at: nil, recent_ids: [])
+      @path = path
+      @last_event_at = last_event_at
+      @recent_ids = recent_ids
+    end
+
+    def empty? = @last_event_at.nil?
+
+    def replay?(event)
+      event = Event.new(event) if event.is_a?(Hash)
+      return false if empty? || event.created_at.nil?
+
+      event.created_at >= @last_event_at && !@recent_ids.include?(event.id)
+    end
+
+    def record(event)
+      return if event.created_at.nil?
+
+      if @last_event_at.nil? || event.created_at > @last_event_at
+        @last_event_at = event.created_at
+        @recent_ids = []
+      end
+      @recent_ids = (@recent_ids | [ event.id ]).last(RECENT_IDS) if event.created_at == @last_event_at
+    end
+
+    def save
+      return unless @path
+
+      FileUtils.mkdir_p(File.dirname(@path))
+      File.write(@path, JSON.generate("last_event_at" => @last_event_at&.utc&.iso8601(3), "recent_ids" => @recent_ids))
+    rescue SystemCallError => error
+      warn "could not save the mark to #{@path}: #{error.message}"
+    end
+  end
+
+  # Replays activity-feed events newer than the mark, oldest first. `fetch`
+  # returns one page of events (newest first) for a 1-based page number.
+  class Catchup
+    MAX_PAGES = 20
+
+    def initialize(fetch:, pipeline:, mark:, max_pages: MAX_PAGES)
+      @fetch = fetch
+      @pipeline = pipeline
+      @mark = mark
+      @max_pages = max_pages
+    end
+
+    def run
+      if @mark.empty?
+        newest = @fetch.call(1).first
+        @mark.record(Event.new(newest)) if newest
+      else
+        missed.reverse_each do |payload|
+          line = @pipeline.replay(payload)
+          yield line if line && block_given?
+        end
+      end
+      @mark.save
+    end
+
+    private
+      def missed
+        events = []
+        (1..@max_pages).each do |page|
+          batch = @fetch.call(page)
+          events.concat(batch.select { @mark.replay?(it) })
+          break if batch.empty? || !@mark.replay?(batch.last)
+        end
+        events
       end
   end
 end

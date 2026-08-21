@@ -29,6 +29,27 @@ class FetchWatchTest < ActiveSupport::TestCase
       process(card_event("card_sent_back_to_triage", column: nil))
   end
 
+  test "a replayed move reports the column it moved to, not the card's current column" do
+    payload = card_event("card_triaged", column: "In Progress").merge("particulars" => { "column" => "Researching" })
+
+    assert_equal 'TRANSITION card=113 state="Researching" by="Mike Dalessio"', process(payload)
+  end
+
+  test "a replayed close reports Done even if the card has since been reopened" do
+    assert_equal 'TRANSITION card=113 state="Done" by="Mike Dalessio"',
+      process(card_event("card_closed", column: "In Progress", closed: false))
+  end
+
+  test "a replayed postpone reports Not Now even if the card has since been revived" do
+    assert_equal 'TRANSITION card=113 state="Not Now" by="Mike Dalessio"',
+      process(card_event("card_auto_postponed", column: "Next", postponed: false))
+  end
+
+  test "a reopened card reports its current state" do
+    assert_equal 'TRANSITION card=113 state="Paused" by="Mike Dalessio"',
+      process(card_event("card_reopened", column: "Paused"))
+  end
+
   test "a comment mentioning me is a mention" do
     assert_equal 'MENTION card=369 comment=comment-1 by="Mike Dalessio"',
       process(comment_event(mention_html("user-harry", "Harry")))
