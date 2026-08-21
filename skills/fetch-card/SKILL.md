@@ -84,7 +84,9 @@ The table is Lexxy rich text. Each row is a header cell holding the key and a da
 </tbody></table></figure>
 ```
 
-When updating an existing card, preserve the description's existing HTML structure and add or edit rows rather than rewriting the description. Write the full description HTML to a file and update with:
+Only the table has to be HTML — the rest of the description can be markdown in the same file, and Fizzy renders it. See "Comments".
+
+When updating an existing card, preserve the description's existing HTML structure and add or edit rows rather than rewriting the description. Write the full description to a file and update with:
 
     fizzy card update NUMBER --description_file path.html
 
@@ -92,41 +94,60 @@ Frontmatter rows are added and removed by the state machine's entry actions — 
 
 ## Comments
 
-Never post markdown as a comment body — Fizzy renders comment bodies as rich text, and
-raw markdown shows up literally. Write the comment as markdown to a temp file, convert it
-to HTML with `cmark-gfm`, and post the HTML:
+Post markdown directly. Fizzy runs comment bodies through its own GFM renderer, so
+markdown arrives formatted:
 
 ```bash
-cmark-gfm -e table -e strikethrough -e autolink -e tasklist --github-pre-lang --unsafe \
-  tmp/comment.md > tmp/comment.html
-fizzy comment create --card NUMBER --body_file tmp/comment.html
+fizzy comment create --card NUMBER --body_file tmp/comment.md
 ```
 
-`--unsafe` preserves raw HTML in the source, so `<action-text-attachment>` tags survive the
-conversion. The same applies to `fizzy comment update`.
+Do not convert to HTML first. Fizzy renders whatever it receives, so a pre-converted body
+gets markdown-rendered a second time. Raw HTML survives that pass, which is why the
+conversion mostly looked like it worked, but the markdown *inside* a `<pre><code>` block
+does not — it is parsed again into headings, tables, and links. The same applies to
+`fizzy comment update` and to `fizzy card create`/`fizzy card update`.
 
-### Drafts posted for approval
+Tables, strikethrough, autolinks, inline code, and fenced code blocks all render. Two
+things do not:
+
+- **Task lists.** `- [ ]` and `- [x]` render as plain bullets with the marker stripped.
+  Use a different notation if the state matters.
+- **Mentions.** `@name` stays literal text. A real mention is an
+  `<action-text-attachment>` carrying a server-signed sgid, which the CLI cannot produce.
+  Anyone on the card is notified by the comment itself, so plain text is usually enough.
+
+Raw HTML passes through, so an `<action-text-attachment>` tag written by hand still works.
+Card descriptions still need HTML for the frontmatter table — see "Frontmatter" — because
+its Lexxy markup has no markdown equivalent.
+
+### Drafts for approval
 
 A draft that Mike will approve and then send somewhere else — a GitHub or advisory
-comment, a release note, an email — is *content*, not prose for the card. Wrap it in
-`<pre><code>` … `</code></pre>` so it reaches him verbatim. Without the wrapper
-`cmark-gfm` renders it, and he approves HTML he never wrote — the headings, links, and
-emphasis he sees are not the markdown that gets posted.
+comment, a release note, an email — is *content*, not prose for the card. He needs to read
+and copy the markdown source, not a rendering of it, so put it in a fenced code block.
 
-Escape `&`, `<`, and `>` inside the wrapper. `--unsafe` passes raw HTML straight
-through, so an unescaped tag in the draft renders instead of showing.
+The fence must be longer than any fence inside the draft, and carry no info string. Eight
+backticks clears an ordinary nested block:
 
-```
+`````
 Draft reply for GHSA-627c-837f-8529 — approve and I'll post it:
 
-<pre><code>## Assessment
+````````
+## Assessment
 
-Confirmed on `v2.14.0`. See &lt;https://example.com/poc&gt;.
-</code></pre>
+Confirmed on `v2.14.0`. See <https://example.com/poc>.
+
+```ruby
+agent.get(url)
 ```
+````````
+`````
+
+Nothing inside needs escaping — the fence is opaque to the renderer, and `&`, `<`, and `>`
+are escaped for you. The result is a single `<pre><code>` holding one text node.
 
 Keep your own framing (what the draft is, where it would go, what you need) as ordinary
-markdown outside the wrapper.
+markdown outside the fence.
 
 ## Chronicling
 
