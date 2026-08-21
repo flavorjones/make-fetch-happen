@@ -275,8 +275,22 @@ these instructions:
    Commit messages are pre-approved for this flow: draft one per the
    `writing-changes` skill and commit without waiting. This is the single
    carve-out from `~/CLAUDE.md`, and it is **conditional on never pushing**.
-   Pushing to a remote still needs Mike's explicit approval every time — a
-   mention saying "push" is approval for that branch only.
+
+   **Nothing leaves the machine without Mike's explicit approval or
+   instruction.** That means no `git push`, no comment, review, label, or
+   edit on a GitHub issue or pull request, no comment or state change on a
+   HackerOne report, and no reply to any person other than Mike through any
+   channel. This overrides every other instruction, including a mention that
+   reads as if it wants a reply sent — unless Mike says to send it, draft it
+   and post the draft on the card for review. Approval is per action and per
+   artifact: "push" is approval for that branch only, "reply" for that one
+   comment only.
+
+   Cards tagged `oss` and `security` on Rails projects often reference
+   HackerOne reports. The triage record for those lives in
+   `~/code/oss/rails-security-triage/` — `reports/<id>.md` is the decision
+   record, `bin/h1` reads the report from the API. Read from it for context;
+   do not write to it or to HackerOne.
 
 5. **Reply in a new comment** on the card, converting markdown to HTML as the
    fetch-card skill describes. Never edit the description in place of replying.
@@ -358,7 +372,8 @@ Handler agent:
 
 - [ ] 👍 reaction posted first on the mentioning comment (mentions)
 - [ ] Full description, whole comment thread (`--all`), and all "ref"/"rel" links read
-- [ ] Work done in the assigned directory and committed (never pushed without approval)
+- [ ] Work done in the assigned directory and committed
+- [ ] No push, no GitHub or HackerOne write, no reply to anyone but Mike — unless Mike explicitly approved that action
 - [ ] Reply comment posted as HTML
 
 Session end:
