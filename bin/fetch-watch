@@ -1,0 +1,214 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Stream Fizzy board events to stdout for the fetch-monitor skill.
+#
+# Opens a path on this machine's Tailscale Funnel, registers a Fizzy webhook on
+# the board pointing at it, and prints one line per signed delivery that matters:
+#
+#   READY <public url>
+#   MENTION card=<number> comment=<id> by="<creator>"
+#   TRANSITION card=<number> state="<state>" by="<creator>"
+#
+# Everything else (rejected signatures, comments that don't mention us, our own
+# events) goes to stderr. The funnel path and the webhook exist only while this
+# process runs: both are removed on exit, including SIGINT/SIGTERM.
+#
+# Every Fizzy call is made as the bot profile, except webhook registration and
+# removal: those need an account admin, and the bot isn't one, so they use the
+# admin profile (by default, whatever `fizzy` profile is active).
+
+require "json"
+require "open3"
+require "optparse"
+require "securerandom"
+require "socket"
+require "webrick"
+require_relative "../lib/fetch_watch"
+
+module FetchWatch
+  ACTIONS = %w[
+    card_triaged card_closed card_postponed card_auto_postponed
+    card_reopened card_sent_back_to_triage card_board_changed comment_created
+  ].freeze
+
+  class CommandError < StandardError; end
+
+  def self.run(*command)
+    stdout, stderr, status = Open3.capture3(*command)
+    raise CommandError, "`#{command.join(" ")}` failed: #{stderr.strip}" unless status.success?
+
+    stdout
+  end
+
+  def self.fizzy(*args, profile:)
+    command = [ "fizzy", *args, "--quiet" ]
+    command += [ "--profile", profile ] if profile
+    parsed = JSON.parse(run(*command))
+    parsed.is_a?(Hash) ? parsed.fetch("data", parsed) : parsed
+  end
+
+  class Tunnel
+    def initialize(path:, port:)
+      @path = path
+      @port = port
+    end
+
+    # The funnel strips the mount path before proxying, so the target carries it
+    # too; otherwise the local server sees every delivery at "/".
+    def start
+      FetchWatch.run("tailscale", "funnel", "--bg", "--set-path", @path, "http://127.0.0.1:#{@port}#{@path}")
+      "https://#{dns_name}#{@path}"
+    end
+
+    # Turning off just our path leaves anything else on the funnel alone.
+    def stop
+      FetchWatch.run("tailscale", "funnel", "--set-path", @path, "off")
+    end
+
+    private
+      def dns_name
+        JSON.parse(FetchWatch.run("tailscale", "status", "--json")).fetch("Self").fetch("DNSName").chomp(".")
+      end
+  end
+
+  class Webhook
+    attr_reader :signing_secret
+
+    def initialize(board:, url:, admin_profile:)
+      @board = board
+      @url = url
+      @admin_profile = admin_profile
+    end
+
+    def register
+      webhook = FetchWatch.fizzy("webhook", "create", "--board", @board, "--name", "fetch-watch #{Socket.gethostname}",
+        "--url", @url, "--actions", ACTIONS.join(","), profile: @admin_profile)
+      @id = webhook.fetch("id")
+      @signing_secret = webhook.fetch("signing_secret")
+    end
+
+    def delete
+      FetchWatch.fizzy("webhook", "delete", @id, "--board", @board, profile: @admin_profile) if @id
+    end
+  end
+
+  class Server
+    def initialize(port:, path:, pipeline:)
+      @pipeline = pipeline
+      @webrick = WEBrick::HTTPServer.new(Port: port, BindAddress: "127.0.0.1",
+        Logger: WEBrick::Log.new(File::NULL), AccessLog: [])
+      @webrick.mount_proc(path) { |request, response| handle(request, response) }
+    end
+
+    def start = @webrick.start
+    def stop = @webrick.shutdown
+
+    private
+      def handle(request, response)
+        if request.request_method == "POST"
+          line = @pipeline.process(body: request.body.to_s, signature: request["X-Webhook-Signature"])
+          emit(line) if line
+          response.status = 200
+        else
+          response.status = 404
+        end
+      end
+
+      def emit(line)
+        $stdout.puts(line)
+        $stdout.flush
+      end
+  end
+
+  class Runner
+    Options = Data.define(:board, :bot_profile, :admin_profile, :port)
+
+    def self.parse(argv)
+      options = { board: "Backlog", bot_profile: "fetchbot", admin_profile: nil, port: nil }
+      OptionParser.new do |parser|
+        parser.banner = "usage: fetch-watch [--bot-profile PROFILE] [--admin-profile PROFILE] [--board NAME] [--port PORT]"
+        parser.on("--bot-profile PROFILE", "fizzy profile of the bot user (default: #{options[:bot_profile]})") { options[:bot_profile] = it }
+        parser.on("--admin-profile PROFILE", "fizzy profile of an account admin, used only to register and remove the webhook (default: the active profile)") { options[:admin_profile] = it }
+        parser.on("--board NAME", "Board to watch (default: #{options[:board]})") { options[:board] = it }
+        parser.on("--port PORT", Integer, "Local port for the webhook listener (default: any free port)") { options[:port] = it }
+      end.parse!(argv)
+      Options.new(**options)
+    end
+
+    def initialize(options)
+      @options = options
+    end
+
+    def start
+      identity = resolve_identity(@options.bot_profile)
+      ensure_admin(@options.admin_profile)
+      board = resolve_board(@options.board)
+
+      port = @options.port || free_port
+      path = "/fizzy/#{SecureRandom.hex(16)}"
+
+      @tunnel = Tunnel.new(path: path, port: port)
+      url = @tunnel.start
+
+      @webhook = Webhook.new(board: board, url: url, admin_profile: @options.admin_profile)
+      @webhook.register
+
+      pipeline = Pipeline.new(identity: identity, secret: @webhook.signing_secret)
+      @server = Server.new(port: port, path: path, pipeline: pipeline)
+      %w[INT TERM].each { |signal| Signal.trap(signal) { @server.stop } }
+
+      warn "Listening for #{identity.name} on #{@options.board} at #{url}"
+      puts "READY #{url}"
+      $stdout.flush
+      @server.start
+    ensure
+      teardown
+    end
+
+    private
+      def resolve_identity(profile)
+        user = user_for(profile)
+        Identity.new(id: user.fetch("id"), name: user.fetch("name"))
+      rescue CommandError => error
+        abort "no usable fizzy profile #{profile.inspect} for the bot: #{error.message}"
+      end
+
+      def ensure_admin(profile)
+        user = user_for(profile)
+        return if %w[admin owner].include?(user["role"])
+
+        abort "#{profile ? "profile #{profile.inspect}" : "the active profile"} is #{user["name"]} (#{user["role"]}); webhook registration needs an account admin"
+      rescue CommandError => error
+        abort "no usable fizzy profile #{profile.inspect} for webhook registration: #{error.message}"
+      end
+
+      def user_for(profile)
+        FetchWatch.fizzy("identity", "show", profile: profile).fetch("accounts").first.fetch("user")
+      end
+
+      def resolve_board(name)
+        board = FetchWatch.fizzy("board", "list", profile: @options.bot_profile).find { it["name"] == name }
+        abort "no board named #{name.inspect}" unless board
+        board.fetch("id")
+      end
+
+      def free_port
+        TCPServer.open("127.0.0.1", 0) { it.addr[1] }
+      end
+
+      def teardown
+        @server&.stop
+        report_failure("delete webhook") { @webhook&.delete }
+        report_failure("close funnel path") { @tunnel&.stop }
+      end
+
+      def report_failure(what)
+        yield
+      rescue CommandError => error
+        warn "failed to #{what}: #{error.message}"
+      end
+  end
+end
+
+FetchWatch::Runner.new(FetchWatch::Runner.parse(ARGV)).start if __FILE__ == $PROGRAM_NAME

@@ -34,9 +34,13 @@ triggers:
 
 Conventions for Fizzy cards that track external reports and notifications. Load the "fizzy" skill before interacting with the application.
 
-These conventions apply to the **Backlog** board only. Resolve its ID once and reuse it:
+These conventions apply to the **Backlog** board only, and every `fizzy` command acts as
+the bot user, never as Mike. The bot is the `fetchbot` profile; Mike's own profile is the
+CLI default, so the bot must be selected explicitly. Export it once per session rather
+than passing `--profile fetchbot` on every call:
 
 ```bash
+export FIZZY_PROFILE=fetchbot
 BOARD=$(fizzy board list --jq '.data[] | select(.name == "Backlog") | .id')
 ```
 
@@ -156,6 +160,10 @@ isn't one, move the card and post a comment asking Mike to add one.
 
 **Paused** — there must be a comment saying why it's paused. If there isn't one, move the
 card and post a comment asking Mike to add one.
+
+For both, "a comment" means one posted since the card last entered the state. Fizzy logs
+every move as a comment from the `System` user (`creator.role` is `"system"`), so the
+latest such "moved this to …" comment marks the entry; only human comments after it count.
 
 **In Review** — the artifact under review must be tracked as "output" in the frontmatter.
 Add the row if it's missing; ask Mike for the URL if you can't determine it.
