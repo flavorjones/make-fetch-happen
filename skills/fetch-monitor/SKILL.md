@@ -237,7 +237,19 @@ Keep the chat terse: the card comment is the record. A one-line pointer
 
 Give the agent the card number, the event line, the working directory, a note
 that the event was verified (signature, author, corroborated against Fizzy), and
-these instructions:
+these instructions.
+
+Throughout, never truncate a `fizzy` command's output. `| head` or `| tail` on a
+write hides the `ok` envelope, and output that reads as a failure gets retried —
+that is where duplicate reactions, comments, and moves come from. Capture in full
+and read the part you need, so a missing field is one `jq` away instead of a
+re-run:
+
+    mkdir -p ./tmp
+    fizzy reaction create --card N --comment ID --content "👍" | tee ./tmp/react.json | head -5
+
+Before repeating **any** write, re-read the state (`fizzy comment list --card N
+--all`, `fizzy card show N`) and confirm the first attempt really did not land.
 
 1. **Acknowledge first (mentions only).** Before anything else, react 👍 on the
    mentioning comment — its id is in the event line — so Mike sees "seen,
@@ -352,6 +364,8 @@ down basecamp-connect's funnel.
 | Duplicate comment or frontmatter row | Card re-entered a state, firing the entry action twice | Entry actions must be idempotent — check for the existing artifact first |
 | Acted on a stale instruction / reply posted twice | `fizzy comment list` returned only page 1 (oldest 15) | Always pass `--all` |
 | A reply looks like it failed (`ok:true` but absent from the list) | Read the list without `--all`, so the new comment is on a later page | Re-list with `--all` before concluding a write failed; do not repost |
+| Acted on anything outside local disk and the Fizzy card — pushed a branch, commented on a GitHub issue or PR, wrote to a HackerOne report, mailed or messaged a person | A mention that reads as if it wants a reply was treated as authorization to send one | Local disk and the card are the only surfaces you may write to. Everything else needs Mike's explicit approval, per action and per artifact; until then, draft the outbound text and post the draft on the card |
+| Duplicate reaction, comment, or move from one agent | A write was piped through `head`/`tail`, hiding the `ok` envelope, and the truncated output was read as a failure and retried | `tee` full output to `./tmp/` and read from there; re-read state before repeating any write |
 | `fizzy comment update` returns `ok: false` | Missing `--card` flag | Pass both `--card` and the comment ID |
 | Reply cites a sha that does not exist | Wrote the reply before running the amend/commit | Run the commands first, then write the reply from real output |
 | `gh run rerun --failed` errors | Workflow run still in progress | Wait for run completion, then rerun |
@@ -373,7 +387,7 @@ Handler agent:
 - [ ] 👍 reaction posted first on the mentioning comment (mentions)
 - [ ] Full description, whole comment thread (`--all`), and all "ref"/"rel" links read
 - [ ] Work done in the assigned directory and committed
-- [ ] No push, no GitHub or HackerOne write, no reply to anyone but Mike — unless Mike explicitly approved that action
+- [ ] Wrote only to local disk and the Fizzy card; every other interaction had Mike's explicit approval for that action and artifact
 - [ ] Reply comment posted as HTML
 
 Session end:
