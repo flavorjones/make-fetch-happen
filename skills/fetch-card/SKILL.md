@@ -50,6 +50,22 @@ Some pieces of information we need to know:
 - project name: generally the project repository name, e.g. "https://github.com/sparklemotion/nokogiri" becomes "nokogiri"
 - ref: a reference URL for the external report or issue
 
+## Reading command output
+
+Shape a response with `--jq`, never with `head` or `tail`. Truncating cuts off the `ok`
+envelope, a write that succeeded reads as a failure, and the retry duplicates the
+reaction, comment, or move:
+
+```bash
+fizzy reaction create --card N --comment ID --content "👍" --jq '{ok, id: .data.id}'
+```
+
+When you do need the whole response, `tee` it to `./tmp/` and read from the file, so a
+missing field is one more `--jq` away instead of a second write.
+
+Before repeating **any** write, re-read the state (`fizzy comment list --card N --all`,
+`fizzy card show N`) and confirm the first attempt really did not land.
+
 ## Title
 
 The title should always be in the format:
