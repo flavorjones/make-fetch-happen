@@ -134,6 +134,11 @@ Fizzy columns are the card's state machine.
 A new card starts in "Maybe?". Do not move a card out of "Maybe?" on your own initiative —
 that is the prioritization decision the column exists to hold. Wait for Mike.
 
+An instruction from Mike to research something ("please research this", "look into
+why…", "figure out how…") is also an instruction to move the card to "Researching". Move
+it first, run the entry actions, then do the research. If the card is already there, just
+do the research.
+
 The states are not a linear path. A card can move to "Paused" or "Researching" from
 anywhere, and back out again.
 
@@ -155,8 +160,9 @@ for it in a comment.
 **In Progress** — if the frontmatter has no "worktree", create one following the git
 worktree rules in `~/CLAUDE.md` and add the "worktree" row.
 
-**Researching** — there must be a comment saying what needs to be researched. If there
-isn't one, move the card and post a comment asking Mike to add one.
+**Researching** — same worktree action as "In Progress". Also, there must be a comment
+saying what needs to be researched. If there isn't one, move the card and post a comment
+asking Mike to add one.
 
 **Paused** — there must be a comment saying why it's paused. If there isn't one, move the
 card and post a comment asking Mike to add one.
@@ -164,6 +170,9 @@ card and post a comment asking Mike to add one.
 For both, "a comment" means one posted since the card last entered the state. Fizzy logs
 every move as a comment from the `System` user (`creator.role` is `"system"`), so the
 latest such "moved this to …" comment marks the entry; only human comments after it count.
+The one exception is the comment that triggered the move — a research instruction that
+made you move the card to "Researching" is the comment, even though it predates the
+`System` entry.
 
 **In Review** — the artifact under review must be tracked as "output" in the frontmatter.
 Add the row if it's missing; ask Mike for the URL if you can't determine it.

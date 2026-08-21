@@ -208,13 +208,16 @@ request. Those need no repository; skip to dispatch.
 
 ### 4. Find or create the worktree
 
-Cards in **In Progress**, **Paused**, **In Review**, or **Pending Release**
-should have a worktree. For those:
+Cards in **Researching**, **In Progress**, **Paused**, **In Review**, or
+**Pending Release** should have a worktree. So should a card whose mention asks
+for research — the handler will move it to **Researching** (fetch-card), so it
+needs the worktree before dispatch. For those:
 
 - frontmatter has a "worktree" row and the path exists → use it
 - no row, or the path is gone → create one following the git worktree rules in
   `~/CLAUDE.md` and write the "worktree" row (this is fetch-card's "In Progress"
-  entry action; running it here is the same action, not a second one)
+  / "Researching" entry action; running it here is the same action, not a
+  second one)
 
 Cards in any other state work in the base repo checkout.
 
@@ -262,7 +265,9 @@ these instructions:
 4. **Do the work.**
    - A **mention** is an instruction or a question. A question gets an answer
      with evidence (commands run, shas, links) — do the research first and show
-     it. An instruction gets done in full, then confirmed.
+     it. An instruction gets done in full, then confirmed. An instruction to
+     research something also moves the card to **Researching** first
+     (fetch-card); the worktree for it was created before dispatch.
    - A **transition** means running fetch-card's entry actions for the state
      entered.
 
