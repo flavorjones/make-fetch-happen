@@ -74,6 +74,21 @@ When updating an existing card, preserve the description's existing HTML structu
 
 Typical lifecycle: a card is created with "ref"; "worktree" is added when work starts; "output" is added when a pull request goes up for review.
 
+## Comments
+
+Never post markdown as a comment body — Fizzy renders comment bodies as rich text, and
+raw markdown shows up literally. Write the comment as markdown to a temp file, convert it
+to HTML with `cmark-gfm`, and post the HTML:
+
+```bash
+cmark-gfm -e table -e strikethrough -e autolink -e tasklist --github-pre-lang --unsafe \
+  tmp/comment.md > tmp/comment.html
+fizzy comment create --card NUMBER --body_file tmp/comment.html
+```
+
+`--unsafe` preserves raw HTML in the source, so `<action-text-attachment>` tags survive the
+conversion. The same applies to `fizzy comment update`.
+
 ## Chronicling
 
 "Chronicle" or "journal" means: add a comment to the card. Nothing else. It never
