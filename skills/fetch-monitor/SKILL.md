@@ -230,6 +230,13 @@ One background subagent per event (`subagent_type: general-purpose`), named
 send the new event to it with `SendMessage` instead of dispatching a second —
 two agents in one worktree corrupt each other's work.
 
+**Never re-send an instruction to a busy agent.** A card read as stale is not
+evidence the agent missed you — it is usually still working. Before repeating
+anything, check whether the agent is running (`ListAgents`, or its last idle
+notification) and wait for it to go idle. Only then re-read the card, and re-send
+only what is still undone. A crossed re-send makes the agent redo writes it has
+already made.
+
 Keep the chat terse: the card comment is the record. A one-line pointer
 ("dispatched for #335") is enough.
 
@@ -355,6 +362,7 @@ down basecamp-connect's funnel.
 | Old events replayed on every start | Mark file not writable | Check `~/.config/fizzy/fetch-last.json`; the script prints the write failure on stderr |
 | Watching session stops seeing events | Did the work inline instead of dispatching | Prepare and dispatch only; the subagent does the work |
 | Two agents fighting over one worktree | Second event on a card dispatched a second agent | `SendMessage` the running `card-NUMBER` agent instead |
+| Handler told to redo work it had just finished | Instruction re-sent while the agent was still running, on a card read that went stale mid-work | Wait for the agent to go idle, then re-read the card and re-send only what is undone |
 | Agent works in the wrong checkout | Working directory left to the agent to figure out | Resolve repo and worktree before dispatch, and name the directory in the brief |
 | Wrong repo guessed from the title | Project prefix does not match a directory under either base, or the title has no prefix at all | Ask on the card; record the answer as a "repo" frontmatter row |
 | Agent dispatched with nothing to do | Transition into a state with no entry action | Filter at step 2; only six states carry work |
