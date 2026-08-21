@@ -4,8 +4,9 @@ description: |
   Create and maintain Fizzy cards that track external reports and notifications
   (GitHub issues and PRs, HackerOne reports, security advisories, review requests).
   Defines the card conventions: title format, tags, the frontmatter key/value table,
-  column state, and golden-ness. Use whenever creating a card for an external
-  artifact or updating the frontmatter of an existing card.
+  the column state machine and its entry actions, and golden-ness. Use whenever
+  creating a card for an external artifact, updating the frontmatter of an existing
+  card, or moving a card between columns.
 triggers:
   # Direct invocations
   - fetch-card
@@ -19,6 +20,11 @@ triggers:
   - update the frontmatter
   - set the output
   - record the worktree
+  # State transitions
+  - move the card to
+  - change the state
+  - mark it in progress
+  - mark it done
   # Chronicling progress
   - chronicle
   - journal
@@ -27,6 +33,12 @@ triggers:
 # fetch-card
 
 Conventions for Fizzy cards that track external reports and notifications. Load the "fizzy" skill before interacting with the application.
+
+These conventions apply to the **Backlog** board only. Resolve its ID once and reuse it:
+
+```bash
+BOARD=$(fizzy board list --jq '.data[] | select(.name == "Backlog") | .id')
+```
 
 Some pieces of information we need to know:
 
@@ -72,7 +84,7 @@ When updating an existing card, preserve the description's existing HTML structu
 
     fizzy card update NUMBER --description_file path.html
 
-Typical lifecycle: a card is created with "ref"; "worktree" is added when work starts; "output" is added when a pull request goes up for review.
+Frontmatter rows are added and removed by the state machine's entry actions — see "State".
 
 ## Comments
 
@@ -101,7 +113,69 @@ to change.
 
 ## State
 
-Fizzy uses columns to track state like a kanban board. A new card should always start in the "Maybe?" column.
+Fizzy columns are the card's state machine.
+
+| Column | Meaning |
+|---|---|
+| Maybe? | Initial state. Awaiting Mike's decision on prioritization. |
+| Next | Prioritized as something Mike intends to work on. Nothing started yet. |
+| Researching | More information is needed before work can start. |
+| In Progress | Actively being worked on. |
+| Paused | Work has stopped, usually because it is blocked or became less urgent. |
+| In Review | Output has been generated and is waiting on external review and feedback. |
+| Pending Release | Complete and approved, but not releasable yet. Usually an embargoed security fix. Rare. |
+| Done | Everything is done. |
+| Not Now | Decided against — we are not going to do this. |
+
+A new card starts in "Maybe?". Do not move a card out of "Maybe?" on your own initiative —
+that is the prioritization decision the column exists to hold. Wait for Mike.
+
+The states are not a linear path. A card can move to "Paused" or "Researching" from
+anywhere, and back out again.
+
+Moving a card needs the column's ID, not its name:
+
+```bash
+COLUMN=$(fizzy column list --board "$BOARD" --jq '.data[] | select(.name == "In Progress") | .id')
+fizzy card column NUMBER --column "$COLUMN"
+```
+
+"Maybe?", "Not Now", and "Done" are pseudo-columns whose IDs are the literals `maybe`,
+`not-now`, and `done`.
+
+### Entry actions
+
+Run these whenever a card enters the state, whether you initiated the move or Mike asked
+for it in a comment.
+
+**In Progress** — if the frontmatter has no "worktree", create one following the git
+worktree rules in `~/CLAUDE.md` and add the "worktree" row.
+
+**Researching** — there must be a comment saying what needs to be researched. If there
+isn't one, move the card and post a comment asking Mike to add one.
+
+**Paused** — there must be a comment saying why it's paused. If there isn't one, move the
+card and post a comment asking Mike to add one.
+
+**In Review** — the artifact under review must be tracked as "output" in the frontmatter.
+Add the row if it's missing; ask Mike for the URL if you can't determine it.
+
+**Done** — first confirm every "output" is approved or merged (`gh pr view URL --json
+state,reviewDecision`). If any isn't, leave the card where it is and say so. Otherwise clean
+up the worktree.
+
+**Not Now** — clean up the worktree. There is nothing to confirm; the decision is not to do
+the work.
+
+Cleaning up the worktree means removing it, deleting its local branch, and dropping the
+"worktree" row from the frontmatter:
+
+```bash
+git worktree remove PATH
+git branch -d BRANCH
+```
+
+Use `git branch -D` only after Mike confirms the unmerged work is disposable.
 
 ## Golden-ness
 
