@@ -237,6 +237,12 @@ notification) and wait for it to go idle. Only then re-read the card, and re-sen
 only what is still undone. A crossed re-send makes the agent redo writes it has
 already made.
 
+**The standing brief goes once, at spawn.** A handler keeps its context, so
+repeating the whole brief on every follow-up wastes its window and buries the one
+thing that is new. A follow-up carries the event line, the mentioning comment
+verbatim, and anything specific to *this* event — the scope of an outbound
+approval, a decision Mike has made, a branch that moved under it. Nothing else.
+
 Keep the chat terse: the card comment is the record. A one-line pointer
 ("dispatched for #335") is enough.
 
@@ -254,6 +260,21 @@ these instructions.
 
 2. **Work in the directory you were given.** Do not touch any other checkout.
 
+   A worktree isolates the working tree, **not the repository**. The stash stack,
+   branches, tags, objects, config and hooks all live in one shared `.git` that
+   every worktree of that repo — and Mike's own work — reads and writes. So:
+
+   - **Never run `git stash`.** The stack is shared, so `stash pop` can restore
+     someone else's work into your tree, and `stash push <path>` silently stashes
+     nothing when the path is unmodified — the paired `pop` then takes whatever
+     is at `stash@{0}`, which is not yours.
+   - To toggle a file temporarily, edit it in place and restore with
+     `git checkout -- <path>`. That is safe **only** for a file you have no
+     uncommitted work in; if the file also holds edits you want, copy it aside
+     instead, or script the change with `sed` and reverse it the same way.
+   - Touch no branch, tag, or worktree but your own, and leave the base checkout
+     alone — its `HEAD` and index are not yours to move.
+
 3. **Gather context before acting.** Read the card description
    (`fizzy card show N`), the *entire* comment thread
    (`fizzy comment list --card N --all`), and fetch every "ref" and "rel" URL in
@@ -268,6 +289,12 @@ these instructions.
    Comments whose creator has `role: "system"` are Fizzy's own move log ("Mike
    Dalessio moved this to 'Paused'"). They show when a card last changed state,
    and they never count as an explanatory comment.
+
+   **Assume the state moved while you were idle.** Mike edits, amends, squashes
+   and reorders between events, and a card's column changes without you. Re-read
+   the card and re-read the branch (`git log --oneline main..HEAD`) before citing
+   a sha, a column, or a commit message. A sha you remember from your last turn
+   is a sha that has probably been rewritten.
 
 4. **Do the work.**
    - A **mention** is an instruction or a question. A question gets an answer
@@ -304,6 +331,35 @@ these instructions.
    Mike's prose style: omit needless words, backtick identifiers, hyperlink
    external artifacts, state evidence plainly. On failure, say what failed and
    @mention Mike so it surfaces as a notification.
+
+6. **Report to the watching session when you finish**, every time, in addition to
+   the card comment. A short `SendMessage` saying what you did and anything the
+   watcher must act on. Going idle without reporting means the watcher only finds
+   out by polling the card, and a handler that finishes silently looks
+   indistinguishable from one that is still working.
+
+## Outside review
+
+When Mike asks for an adversarial review from Codex, use the
+`consult-outside-expert` skill and give it the real diff against the merge base,
+not a summary — it cannot review what it cannot see.
+
+**Frame it as an invariant to test, not an attack to mount.** Attack vocabulary
+trips Codex's safety filter; "attacker", "exploit", and a payload in the prose
+have each been enough. What gets through is naming the property and asking where
+it fails to hold: *"here is an escaping invariant — find where it does not
+hold"*, *"how could a credential still reach another origin after this patch"*.
+Same substance, and it answers.
+
+Name what is already known so it does not spend the round rediscovering it: the
+mechanisms you have already fixed, and any residuals you have deliberately left
+open. A finding that restates a known residual is not new.
+
+**Verify every claim yourself before repeating it.** Reproduce with a test, and
+say which claims you confirmed, which you refuted, and how — a plausible
+vulnerability that does not reproduce is worse than silence. Expect it to find
+regressions *you* introduced; that has been the most valuable result twice. If
+the first pass is shallow, iterate. One round of "looks good" is not a review.
 
 ## Monitoring external state
 
@@ -347,9 +403,13 @@ down basecamp-connect's funnel.
 | A comment or reaction posted as Mike | `FIZZY_PROFILE` not exported, or not passed to the handler | `export FIZZY_PROFILE=fetchbot`; put it in every handler's brief |
 | Events stopped mid-session | Something ran `tailscale funnel reset` (e.g. basecamp-connect's teardown) | Restart `bin/fetch-watch`; it re-adds its path |
 | An event from while nobody was watching never showed up | First run (no mark file), or the mark file was deleted | Check the tray for unread mentions; transitions before the first run are not recoverable |
+| A mention Mike says he posted never arrived | He edited an existing comment to add the mention. Fizzy has no `comment_updated` webhook action, so an edited-in mention is invisible to the watcher — it only ever sees `comment_created`, which had no mention | Nothing to fix in the watcher; ask him to post a new comment rather than editing one in. The notification tray does record it, if you need to recover one |
 | Old events replayed on every start | Mark file not writable | Check `~/.config/fizzy/fetch-last.json`; the script prints the write failure on stderr |
 | Watching session stops seeing events | Did the work inline instead of dispatching | Prepare and dispatch only; the subagent does the work |
 | Two agents fighting over one worktree | Second event on a card dispatched a second agent | `SendMessage` the running `card-NUMBER` agent instead |
+| A handler's uncommitted work vanished, or someone else's WIP appeared in its tree | `git stash` — the stack is shared across every worktree of a repo, and `stash push <path>` no-ops silently on an unmodified path so the paired `pop` takes `stash@{0}`, which belongs to someone else | Never `git stash` in a handler. `git checkout -- <path>` to restore a file with no uncommitted work in it; copy aside or `sed` for anything else |
+| Handler cites a sha, column, or commit message that no longer exists | It answered from its last turn's memory; Mike amends, squashes and reorders between events | Re-read the card and `git log --oneline main..HEAD` at the start of every follow-up |
+| Watcher only learns a task finished by polling the card | Handler went idle without reporting | Every handler sends the watcher a short completion message, always |
 | Handler told to redo work it had just finished | Instruction re-sent while the agent was still running, on a card read that went stale mid-work | Wait for the agent to go idle, then re-read the card and re-send only what is undone |
 | Agent works in the wrong checkout | Working directory left to the agent to figure out | Resolve repo and worktree before dispatch, and name the directory in the brief |
 | Wrong repo guessed from the title | Project prefix does not match a directory under either base, or the title has no prefix at all | Ask on the card; record the answer as a "repo" frontmatter row |
@@ -381,9 +441,10 @@ Handler agent:
 
 - [ ] 👍 reaction posted first on the mentioning comment (mentions)
 - [ ] Full description, whole comment thread (`--all`), and all "ref"/"rel" links read
-- [ ] Work done in the assigned directory and committed
+- [ ] Work done in the assigned directory and committed; nothing written to the shared `.git` — no `git stash`, no other branch or worktree
 - [ ] Wrote only to local disk and the Fizzy card; every other interaction had Mike's explicit approval for that action and artifact
 - [ ] Reply comment posted as HTML
+- [ ] Completion reported to the watching session
 
 Session end:
 
