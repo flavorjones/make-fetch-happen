@@ -103,11 +103,16 @@ module FetchWatch
   end
 
   class Pipeline
-    def initialize(identity:, secret:, mark: Mark.new, log: $stderr)
+    NOTHING = ->(_event) {}
+
+    # `acknowledge` is called with a live mention the moment it clears the
+    # filters, so Mike sees the board react before a handler is even dispatched.
+    def initialize(identity:, secret:, mark: Mark.new, log: $stderr, acknowledge: NOTHING)
       @identity = identity
       @secret = secret
       @mark = mark
       @log = log
+      @acknowledge = acknowledge
       @seen = Set.new
     end
 
@@ -115,7 +120,7 @@ module FetchWatch
     def process(body:, signature:)
       return log("rejected: bad signature") unless Signature.valid?(body: body, signature: signature, secret: @secret)
 
-      handle(Event.new(JSON.parse(body)))
+      handle(Event.new(JSON.parse(body)), acknowledge: true)
     rescue JSON::ParserError
       log("rejected: malformed payload")
     end
@@ -127,25 +132,34 @@ module FetchWatch
     end
 
     private
-      def handle(event)
+      def handle(event, acknowledge: false)
         @mark.record(event)
         @mark.save
         return log("ignored #{event.id}: already delivered") unless @seen.add?(event.id)
         return log("ignored #{event.id}: own #{event.action}") if event.creator_id == @identity.id
 
-        line_for(event)
+        line_for(event, acknowledge: acknowledge)
       end
 
-      def line_for(event)
+      def line_for(event, acknowledge:)
         if event.comment?
           return log("ignored #{event.id}: comment without mention") unless event.mentions?(@identity)
 
+          acknowledge(event) if acknowledge
           %(MENTION card=#{event.card_number} comment=#{event.comment_id} by="#{event.creator_name}")
         elsif event.transition?
           %(TRANSITION card=#{event.card_number} state="#{event.card_state}" by="#{event.creator_name}")
         else
           log("ignored #{event.id}: #{event.action}")
         end
+      end
+
+      # Best effort: the event matters more than the receipt, so a failure here
+      # is logged and the line still goes out.
+      def acknowledge(event)
+        @acknowledge.call(event)
+      rescue => error
+        log("could not acknowledge #{event.id}: #{error.message}")
       end
 
       def log(message)

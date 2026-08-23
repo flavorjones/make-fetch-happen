@@ -60,6 +60,55 @@ class FetchWatchTest < ActiveSupport::TestCase
       process(comment_event("<p>hey</p>", plain_text: "@Harry please look"))
   end
 
+  test "a mention is acknowledged as soon as it passes the filters" do
+    acknowledged = []
+    pipeline = FetchWatch::Pipeline.new(identity: HARRY, secret: SECRET, log: StringIO.new,
+      acknowledge: ->(event) { acknowledged << [ event.card_number, event.comment_id ] })
+
+    process(comment_event(mention_html("user-harry", "Harry")), pipeline: pipeline)
+
+    assert_equal [ [ 369, "comment-1" ] ], acknowledged
+  end
+
+  test "a comment that does not mention me is not acknowledged" do
+    acknowledged = []
+    pipeline = FetchWatch::Pipeline.new(identity: HARRY, secret: SECRET, log: StringIO.new,
+      acknowledge: ->(event) { acknowledged << event.comment_id })
+
+    process(comment_event("<p>no mention here</p>"), pipeline: pipeline)
+
+    assert_empty acknowledged
+  end
+
+  test "a transition is not acknowledged" do
+    acknowledged = []
+    pipeline = FetchWatch::Pipeline.new(identity: HARRY, secret: SECRET, log: StringIO.new,
+      acknowledge: ->(event) { acknowledged << event.id })
+
+    process(card_event("card_triaged", column: "Researching"), pipeline: pipeline)
+
+    assert_empty acknowledged
+  end
+
+  test "a replayed mention is not acknowledged" do
+    acknowledged = []
+    pipeline = FetchWatch::Pipeline.new(identity: HARRY, secret: SECRET, log: StringIO.new,
+      acknowledge: ->(event) { acknowledged << event.comment_id })
+
+    line = pipeline.replay(comment_event(mention_html("user-harry", "Harry")))
+
+    assert_equal 'MENTION card=369 comment=comment-1 by="Mike Dalessio"', line
+    assert_empty acknowledged
+  end
+
+  test "a mention is still emitted when acknowledging it fails" do
+    pipeline = FetchWatch::Pipeline.new(identity: HARRY, secret: SECRET, log: StringIO.new,
+      acknowledge: ->(_event) { raise "fizzy is down" })
+
+    assert_equal 'MENTION card=369 comment=comment-1 by="Mike Dalessio"',
+      process(comment_event(mention_html("user-harry", "Harry")), pipeline: pipeline)
+  end
+
   test "a comment that does not mention me is ignored" do
     assert_nil process(comment_event("<p>Released in v2.9.6</p>"))
   end
@@ -97,9 +146,9 @@ class FetchWatchTest < ActiveSupport::TestCase
   end
 
   private
-    def process(payload)
+    def process(payload, pipeline: @pipeline)
       body = JSON.generate(payload)
-      @pipeline.process(body: body, signature: sign(body))
+      pipeline.process(body: body, signature: sign(body))
     end
 
     def sign(body)

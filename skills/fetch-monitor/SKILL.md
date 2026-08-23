@@ -67,6 +67,15 @@ path, don't hunt the filesystem — say so and stop.
 | **Mention** | `MENTION card=N comment=ID by="Mike Dalessio"` | a `comment_created` webhook whose comment @mentions you |
 | **Transition** | `TRANSITION card=N state="Paused" by="Mike Dalessio"` | a card move, close, postpone, reopen, or send-back-to-triage webhook |
 
+**A mention is acknowledged before you see it.** The moment a delivery clears
+the filters, `bin/fetch-watch` reacts 👀 on the mentioning comment as the bot,
+so Mike gets a receipt within seconds of hitting send rather than waiting for a
+handler to read the card. It fires only for live deliveries, never for replayed
+ones — a restart would otherwise re-react to events already handled — and a
+failure to post it is logged to stderr without holding up the event. The
+handler's 👍 still follows and means something different: 👀 is "the watcher saw
+this", 👍 is "an agent has it".
+
 Both kinds go through the same path: the watching session **prepares** the
 repository and worktree, **dispatches** one background subagent, and returns to
 watching immediately. Never do the work in the watching session — a session busy
@@ -253,8 +262,9 @@ that the event was verified (signature, author, corroborated against Fizzy), and
 these instructions.
 
 1. **Acknowledge first (mentions only).** Before anything else, react 👍 on the
-   mentioning comment — its id is in the event line — so Mike sees "seen,
-   working on it".
+   mentioning comment — its id is in the event line — so Mike sees "an agent has
+   this". The watcher has already put a 👀 on it; yours is the second signal, not
+   a duplicate.
 
        fizzy reaction create --card N --comment COMMENT_ID --content "👍"
 

@@ -162,7 +162,8 @@ module FetchWatch
       @webhook.register
 
       mark = Mark.load(@options.state)
-      pipeline = Pipeline.new(identity: identity, secret: @webhook.signing_secret, mark: mark)
+      pipeline = Pipeline.new(identity: identity, secret: @webhook.signing_secret, mark: mark,
+        acknowledge: method(:acknowledge))
       @server = Server.new(port: port, path: path, pipeline: pipeline)
       %w[INT TERM].each { |signal| Signal.trap(signal) { @server.stop } }
       serving = Thread.new { @server.start }
@@ -195,6 +196,14 @@ module FetchWatch
 
       def user_for(profile)
         FetchWatch.fizzy("identity", "show", profile: profile).fetch("accounts").first.fetch("user")
+      end
+
+      # A 👀 on the mentioning comment, posted the moment the delivery clears the
+      # filters. It says "seen" seconds after Mike hits send, long before a
+      # handler has read the card.
+      def acknowledge(event)
+        FetchWatch.fizzy("reaction", "create", "--card", event.card_number.to_s,
+          "--comment", event.comment_id, "--content", "👀", profile: @options.bot_profile)
       end
 
       def resolve_board(name)
