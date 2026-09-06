@@ -114,21 +114,27 @@ module FetchWatch
       @log = log
       @acknowledge = acknowledge
       @seen = Set.new
+      # The webhook server and the poller both land here, so the seen-set and
+      # the mark need one writer at a time.
+      @lock = Mutex.new
     end
 
     # A signed webhook delivery.
     def process(body:, signature:)
       return log("rejected: bad signature") unless Signature.valid?(body: body, signature: signature, secret: @secret)
 
-      handle(Event.new(JSON.parse(body)), acknowledge: true)
+      @lock.synchronize { handle(Event.new(JSON.parse(body)), acknowledge: true) }
     rescue JSON::ParserError
       log("rejected: malformed payload")
     end
 
     # An event read back from the board's activity feed, which is already
-    # authenticated by the API call that fetched it.
-    def replay(payload)
-      handle(Event.new(payload))
+    # authenticated by the API call that fetched it. The startup catch-up leaves
+    # `acknowledge` off, because those events may be hours old and Mike has
+    # already moved on; the poller turns it on, because an event it picks up is
+    # one the webhook just failed to deliver and the receipt is still wanted.
+    def replay(payload, acknowledge: false)
+      @lock.synchronize { handle(Event.new(payload), acknowledge: acknowledge) }
     end
 
     private
@@ -222,11 +228,12 @@ module FetchWatch
   class Catchup
     MAX_PAGES = 20
 
-    def initialize(fetch:, pipeline:, mark:, max_pages: MAX_PAGES)
+    def initialize(fetch:, pipeline:, mark:, max_pages: MAX_PAGES, acknowledge: false)
       @fetch = fetch
       @pipeline = pipeline
       @mark = mark
       @max_pages = max_pages
+      @acknowledge = acknowledge
     end
 
     def run
@@ -235,7 +242,7 @@ module FetchWatch
         @mark.record(Event.new(newest)) if newest
       else
         missed.reverse_each do |payload|
-          line = @pipeline.replay(payload)
+          line = @pipeline.replay(payload, acknowledge: @acknowledge)
           yield line if line && block_given?
         end
       end

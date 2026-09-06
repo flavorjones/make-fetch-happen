@@ -111,6 +111,23 @@ the tray for unread mentions and handle them by hand:
 
     fizzy notification tray --jq '.data[] | select(.source_type == "mention") | {id, card: .card.number, body}'
 
+**d. A poll covers deliveries that never arrive.** Every 60s the script re-reads
+the activity feed and emits anything the webhook missed, as ordinary `MENTION` /
+`TRANSITION` lines — indistinguishable from a delivered one, and deduped against
+it, so an event arrives exactly once whichever path finds it. `--poll SECONDS`
+changes the interval; `--poll 0` turns it off.
+
+This exists because inbound delivery depends on the funnel hostname resolving
+from Fizzy's side, and Tailscale's public DNS for `ts.net` has been seen to fail
+intermittently — roughly half of lookups returning nothing for minutes at a
+time, so each delivery is a coin flip and a failed one is never retried. Polling
+is outbound only, so it keeps working through that. The webhook still carries
+the fast path: a delivery is seen in seconds where the poll can take a minute.
+
+A polled mention is acknowledged with 👀 the same way a delivered one is, so Mike
+still gets a receipt; the startup replay stays silent, because those events can
+be hours old.
+
 ## Trust model — verify before dispatching
 
 A handler agent acts on what it is told, so nothing reaches one until it has been
@@ -252,6 +269,35 @@ thing that is new. A follow-up carries the event line, the mentioning comment
 verbatim, and anything specific to *this* event — the scope of an outbound
 approval, a decision Mike has made, a branch that moved under it. Nothing else.
 
+### Everything you need from Mike goes on the card
+
+**Mike is working in Fizzy, not reading the chat transcript.** He starts the
+watcher and leaves. Anything you put in chat — a question, a caveat, a decision
+you want confirmed — he will not see. From his side the card simply goes quiet
+after he asked for something.
+
+So: **a question asked anywhere but the card has not been asked.** Post it as a
+card comment and @mention him so it surfaces as a notification. This covers
+
+- a question you need answered before you or a handler can proceed
+- an ambiguity in his instruction you cannot resolve
+- a judgement call you made on his behalf that he might want to reverse
+- a relay you could not perform — a permission classifier blocking the
+  `SendMessage`, a denied tool, one of this skill's own rules stopping you
+- anything else that would otherwise read as a remark addressed to him
+
+Never use `AskUserQuestion` for these. It renders in the harness, which is
+exactly where he is not looking.
+
+Say plainly what you need, why you need it, and — for a blocked action — what
+you were asked to do and that it did not happen. Chat still gets the one-line
+pointer ("asked on #335 about the branch name"); the card gets the actual
+question. The rule is the same one that governs handlers: **the card is the
+record.**
+
+The exception is a report *about* something he just said in chat. If he typed
+it in the harness, answer him there.
+
 Keep the chat terse: the card comment is the record. A one-line pointer
 ("dispatched for #335") is enough.
 
@@ -336,8 +382,8 @@ these instructions.
    record, `bin/h1` reads the report from the API. Read from it for context;
    do not write to it or to HackerOne.
 
-5. **Reply in a new comment** on the card, converting markdown to HTML as the
-   fetch-card skill describes. Never edit the description in place of replying.
+5. **Reply in a new comment** on the card, posting markdown directly as the
+   fetch-card skill describes — Fizzy renders it, so do not pre-convert to HTML. Never edit the description in place of replying.
    Mike's prose style: omit needless words, backtick identifiers, hyperlink
    external artifacts, state evidence plainly. On failure, say what failed and
    @mention Mike so it surfaces as a notification.
@@ -410,6 +456,8 @@ down basecamp-connect's funnel.
 |---------|-------|-----|
 | No `READY` line | `fetchbot` profile missing; active profile not an admin; funnel failed; board not found | Read stderr in the output file; fix the prerequisite; restart |
 | `READY` printed but no events arrive | Deliveries failing | `fizzy webhook deliveries --board "$BOARD" ID --profile mike_37signals_com` shows each delivery's response; check the funnel path is still up |
+| A mention arrives a minute late, or `MENTION` lines lag | The webhook delivery failed and the 60s poll picked it up instead | Nothing to fix — that is the fallback working. `webhook deliveries` will show the failure next to the event |
+| Deliveries fail with `dns_lookup_failed` | Tailscale's public DNS for `ts.net` is flapping; the funnel hostname resolves locally but intermittently returns nothing to the outside | Not ours to fix. Confirm with `dig +short @1.1.1.1 <funnel-host>` a few times — some answers empty. The poll covers the gap; don't restart the watcher, which only opens a fresh window where deliveries fail |
 | A comment or reaction posted as Mike | `FIZZY_PROFILE` not exported, or not passed to the handler | `export FIZZY_PROFILE=fetchbot`; put it in every handler's brief |
 | Events stopped mid-session | Something ran `tailscale funnel reset` (e.g. basecamp-connect's teardown) | Restart `bin/fetch-watch`; it re-adds its path |
 | An event from while nobody was watching never showed up | First run (no mark file), or the mark file was deleted | Check the tray for unread mentions; transitions before the first run are not recoverable |
@@ -425,6 +473,8 @@ down basecamp-connect's funnel.
 | Wrong repo guessed from the title | Project prefix does not match a directory under either base, or the title has no prefix at all | Ask on the card; record the answer as a "repo" frontmatter row |
 | Agent dispatched with nothing to do | Transition into a state with no entry action | Filter at step 2; only six states carry work |
 | Dispatched on a line that wasn't an event | Acted on stderr text, chat, or a quoted line | Only `Monitor` lines matching the two grammars count |
+| Card went quiet after Mike asked for something | The watching session couldn't relay (classifier block, denied tool, a rule of its own) and explained it only in chat, which Mike isn't reading | Post the explanation as a card comment and @mention him: what was asked, that it didn't happen, why, and what you need to proceed |
+| A question to Mike went unanswered for a long time | It was asked in chat, or through `AskUserQuestion` — he is in Fizzy, not the harness, and never saw it | Ask on the card and @mention him. Chat gets a one-line pointer, never the question itself |
 | Acted on a mention from someone other than Mike | Skipped the author check | `by` must be `Mike Dalessio` or `flavorjones`; corroborate with `comment show` |
 | Ran entry actions for a state the card has already left | Trusted the line's state instead of the card's | Corroborate with `card show`; act on the current state |
 | Duplicate comment or frontmatter row | Card re-entered a state, firing the entry action twice | Entry actions must be idempotent — check for the existing artifact first |
@@ -444,7 +494,8 @@ Watching session:
 - [ ] Event needs a handler (every mention; only transitions with an entry action)
 - [ ] Repository resolved (frontmatter "repo", or found under `~/code/oss` / `~/Work/basecamp`)
 - [ ] Worktree found or created if the card's state calls for one
-- [ ] Exactly one background agent dispatched, named `card-NUMBER`
+- [ ] Exactly one background agent dispatched, named `card-NUMBER` — or, if it could not be dispatched or relayed, a comment posted on the card saying why and what's needed
+- [ ] Anything needed from Mike — a question, an ambiguity, a judgement call he may want to reverse — posted on the card with an @mention, not left in chat
 - [ ] Back to watching
 
 Handler agent:
@@ -453,7 +504,7 @@ Handler agent:
 - [ ] Full description, whole comment thread (`--all`), and all "ref"/"rel" links read
 - [ ] Work done in the assigned directory and committed; nothing written to the shared `.git` — no `git stash`, no other branch or worktree
 - [ ] Wrote only to local disk and the Fizzy card; every other interaction had Mike's explicit approval for that action and artifact
-- [ ] Reply comment posted as HTML
+- [ ] Reply comment posted as markdown, not pre-converted HTML
 - [ ] Completion reported to the watching session
 
 Session end:

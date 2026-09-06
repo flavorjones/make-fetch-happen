@@ -71,12 +71,52 @@ class FetchWatchCatchupTest < ActiveSupport::TestCase
     refute @mark.replay?(own)
   end
 
+  test "an event the webhook already delivered is not emitted again by a poll" do
+    @mark.record(FetchWatch::Event.new(move("e1", "10:01", "Next")))
+    delivered = move("e2", "10:02", "Paused")
+    body = JSON.generate(delivered)
+
+    assert_equal 'TRANSITION card=113 state="Paused" by="Mike Dalessio"',
+      @pipeline.process(body: body, signature: OpenSSL::HMAC.hexdigest("SHA256", "s3cret", body))
+
+    assert_empty catch_up(pages: [ [ delivered ] ])
+  end
+
+  test "a poll acknowledges a mention the webhook never delivered" do
+    @mark.record(FetchWatch::Event.new(move("e1", "10:01", "Next")))
+    acknowledged = []
+    pipeline = FetchWatch::Pipeline.new(identity: HARRY, secret: "s3cret", mark: @mark, log: StringIO.new,
+      acknowledge: ->(event) { acknowledged << event.id })
+
+    lines = catch_up(pages: [ [ mention("e2", "10:02") ] ], pipeline: pipeline, acknowledge: true)
+
+    assert_equal 1, lines.length
+    assert_equal [ "e2" ], acknowledged
+  end
+
+  test "the startup catch-up does not acknowledge what it replays" do
+    @mark.record(FetchWatch::Event.new(move("e1", "10:01", "Next")))
+    acknowledged = []
+    pipeline = FetchWatch::Pipeline.new(identity: HARRY, secret: "s3cret", mark: @mark, log: StringIO.new,
+      acknowledge: ->(event) { acknowledged << event.id })
+
+    lines = catch_up(pages: [ [ mention("e2", "10:02") ] ], pipeline: pipeline)
+
+    assert_equal 1, lines.length
+    assert_empty acknowledged
+  end
+
   private
-    def catch_up(pages:)
+    def catch_up(pages:, pipeline: @pipeline, acknowledge: false)
       fetch = ->(page) { pages[page - 1] || [] }
       lines = []
-      FetchWatch::Catchup.new(fetch: fetch, pipeline: @pipeline, mark: @mark).run { |line| lines << line }
+      FetchWatch::Catchup.new(fetch: fetch, pipeline: pipeline, mark: @mark, acknowledge: acknowledge).run { |line| lines << line }
       lines
+    end
+
+    def mention(id, time)
+      comment(id, time, %(<p><action-text-attachment content-type="application/vnd.actiontext.mention" ) +
+        %(content="&lt;img src=&quot;/6097036/users/user-harry/avatar&quot;&gt;"></action-text-attachment> hello</p>))
     end
 
     def move(id, time, column)

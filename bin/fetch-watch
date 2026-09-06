@@ -19,6 +19,13 @@
 # payloads. The newest event seen is remembered in the mark file, so the replay
 # covers exactly the gap; the lines come out before READY.
 #
+# The same activity feed is polled on a timer for as long as the process runs,
+# which is the fallback for a webhook delivery that never arrives. Inbound
+# delivery depends on the funnel hostname resolving publicly, and that has been
+# observed to fail intermittently; polling is outbound only, so it keeps working
+# when it does. An event picked up either way is emitted once -- the pipeline
+# dedupes on event id and the mark advances the same way for both.
+#
 # Every Fizzy call is made as the bot profile, except webhook registration and
 # removal: those need an account admin, and the bot isn't one, so they use the
 # admin profile (by default, whatever `fizzy` profile is active).
@@ -127,18 +134,20 @@ module FetchWatch
   end
 
   class Runner
-    Options = Data.define(:board, :bot_profile, :admin_profile, :port, :state)
+    Options = Data.define(:board, :bot_profile, :admin_profile, :port, :state, :poll)
     DEFAULT_STATE = File.expand_path("~/.config/fizzy/fetch-last.json")
+    DEFAULT_POLL = 60
 
     def self.parse(argv)
-      options = { board: "Backlog", bot_profile: "fetchbot", admin_profile: nil, port: nil, state: DEFAULT_STATE }
+      options = { board: "Backlog", bot_profile: "fetchbot", admin_profile: nil, port: nil, state: DEFAULT_STATE, poll: DEFAULT_POLL }
       OptionParser.new do |parser|
-        parser.banner = "usage: fetch-watch [--bot-profile PROFILE] [--admin-profile PROFILE] [--board NAME] [--port PORT] [--state PATH]"
+        parser.banner = "usage: fetch-watch [--bot-profile PROFILE] [--admin-profile PROFILE] [--board NAME] [--port PORT] [--state PATH] [--poll SECONDS]"
         parser.on("--bot-profile PROFILE", "fizzy profile of the bot user (default: #{options[:bot_profile]})") { options[:bot_profile] = it }
         parser.on("--admin-profile PROFILE", "fizzy profile of an account admin, used only to register and remove the webhook (default: the active profile)") { options[:admin_profile] = it }
         parser.on("--board NAME", "Board to watch (default: #{options[:board]})") { options[:board] = it }
         parser.on("--port PORT", Integer, "Local port for the webhook listener (default: any free port)") { options[:port] = it }
         parser.on("--state PATH", "Where the newest event seen is remembered (default: #{DEFAULT_STATE})") { options[:state] = it }
+        parser.on("--poll SECONDS", Integer, "How often to poll the activity feed for deliveries the webhook missed; 0 disables (default: #{DEFAULT_POLL})") { options[:poll] = it }
       end.parse!(argv)
       Options.new(**options)
     end
@@ -172,6 +181,7 @@ module FetchWatch
 
       warn "Listening for #{identity.name} on #{@options.board} at #{url}"
       FetchWatch.emit("READY #{url}")
+      poll(board, pipeline, mark)
       serving.join
     ensure
       teardown
@@ -212,11 +222,31 @@ module FetchWatch
         board.fetch("id")
       end
 
-      def catch_up(board, pipeline, mark)
+      def catch_up(board, pipeline, mark, acknowledge: false)
         fetch = ->(page) { FetchWatch.fizzy("activity", "list", "--board", board, "--page", page.to_s, profile: @options.bot_profile) }
-        Catchup.new(fetch: fetch, pipeline: pipeline, mark: mark).run { |line| FetchWatch.emit(line) }
+        Catchup.new(fetch: fetch, pipeline: pipeline, mark: mark, acknowledge: acknowledge).run { |line| FetchWatch.emit(line) }
       rescue CommandError => error
         warn "catch-up skipped: #{error.message}"
+      end
+
+      # The fallback for a delivery that never arrives. A webhook needs the
+      # funnel hostname to resolve from Fizzy's side; this only needs the API,
+      # so it still finds the event when DNS is failing. Anything the webhook
+      # did deliver is already in the pipeline's seen-set, so polling costs a
+      # request and emits nothing.
+      def poll(board, pipeline, mark)
+        interval = @options.poll.to_i
+        return warn("polling disabled") unless interval.positive?
+
+        warn "polling the activity feed every #{interval}s as a webhook fallback"
+        @poller = Thread.new do
+          loop do
+            sleep interval
+            catch_up(board, pipeline, mark, acknowledge: true)
+          rescue => error
+            warn "poll failed: #{error.message}"
+          end
+        end
       end
 
       def free_port
@@ -224,6 +254,7 @@ module FetchWatch
       end
 
       def teardown
+        @poller&.kill
         @server&.stop
         report_failure("delete webhook") { @webhook&.delete }
         report_failure("close funnel path") { @tunnel&.stop }
