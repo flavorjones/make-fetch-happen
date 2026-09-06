@@ -6,7 +6,7 @@ class FetchWatchCatchupTest < ActiveSupport::TestCase
 
   setup do
     @path = Rails.root.join("tmp", "fetch-watch-catchup-test-#{SecureRandom.hex(4)}.json")
-    @mark = FetchWatch::Mark.load(@path)
+    @mark = FetchWatch::Mark.load(@path, board: "board-1")
     @pipeline = FetchWatch::Pipeline.new(identity: HARRY, secret: "s3cret", mark: @mark, log: StringIO.new)
   end
 
@@ -29,8 +29,8 @@ class FetchWatchCatchupTest < ActiveSupport::TestCase
     lines = catch_up(pages: [ [ move("e3", "10:03", "Paused"), move("e2", "10:02", "In Progress"), move("e1", "10:01", "Next") ] ])
 
     assert_equal [
-      'TRANSITION card=113 state="In Progress" by="Mike Dalessio"',
-      'TRANSITION card=113 state="Paused" by="Mike Dalessio"'
+      'TRANSITION account=6097036 card=113 state="In Progress" by="Mike Dalessio"',
+      'TRANSITION account=6097036 card=113 state="Paused" by="Mike Dalessio"'
     ], lines
   end
 
@@ -45,7 +45,7 @@ class FetchWatchCatchupTest < ActiveSupport::TestCase
     ])
 
     assert_equal 3, lines.length
-    assert_equal 'TRANSITION card=113 state="In Progress" by="Mike Dalessio"', lines.first
+    assert_equal 'TRANSITION account=6097036 card=113 state="In Progress" by="Mike Dalessio"', lines.first
   end
 
   test "replayed events pass through the same filters as deliveries" do
@@ -81,7 +81,8 @@ class FetchWatchCatchupTest < ActiveSupport::TestCase
 
     def move(id, time, column)
       { "id" => id, "action" => "card_triaged", "created_at" => "2026-08-21T#{time}:00.000Z", "creator" => MIKE,
-        "eventable" => { "number" => 113, "closed" => false, "postponed" => false, "column" => { "name" => column } } }
+        "eventable" => { "number" => 113, "closed" => false, "postponed" => false, "column" => { "name" => column },
+                         "url" => "https://app.fizzy.do/6097036/cards/113" } }
     end
 
     def comment(id, time, html)

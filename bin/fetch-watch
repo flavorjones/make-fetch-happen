@@ -3,25 +3,35 @@
 
 # Stream Fizzy board events to stdout for the fetch-monitor skill.
 #
-# Opens a path on this machine's Tailscale Funnel, registers a Fizzy webhook on
-# the board pointing at it, and prints one line per signed delivery that matters:
+# For each board in the watch list, opens a path on this machine's Tailscale
+# Funnel, registers a Fizzy webhook on the board pointing at it, and prints one
+# line per signed delivery that matters:
 #
-#   READY <public url>
-#   MENTION card=<number> comment=<id> by="<creator>"
-#   TRANSITION card=<number> state="<state>" by="<creator>"
+#   READY account=<id> board="<name>" <public url>
+#   MENTION account=<id> card=<number> comment=<id> by="<creator>"
+#   TRANSITION account=<id> card=<number> state="<state>" by="<creator>"
 #
+# Card numbers restart per account, so every line names the account too.
 # Everything else (rejected signatures, comments that don't mention us, our own
-# events) goes to stderr. The funnel path and the webhook exist only while this
-# process runs: both are removed on exit, including SIGINT/SIGTERM.
+# events) goes to stderr. The funnel paths and the webhooks exist only while
+# this process runs: all are removed on exit, including SIGINT/SIGTERM.
 #
 # Events that happened while nothing was listening are replayed on startup from
-# the board's activity feed, which has the same shape and ids as the webhook
-# payloads. The newest event seen is remembered in the mark file, so the replay
-# covers exactly the gap; the lines come out before READY.
+# each board's activity feed, which has the same shape and ids as the webhook
+# payloads. The newest event seen per board is remembered in the mark file, so
+# the replay covers exactly the gap; the lines come out before that board's
+# READY.
 #
-# Every Fizzy call is made as the bot profile, except webhook registration and
-# removal: those need an account admin, and the bot isn't one, so they use the
-# admin profile (by default, whatever `fizzy` profile is active).
+# A `fizzy` profile is pinned to one account, so each board carries its own
+# pair: the bot profile makes every call for that board except webhook
+# registration and removal, which need an account admin there, and so use the
+# admin profile. The watch list lives in ~/.config/fizzy/fetch-watch.json:
+#
+#   { "boards": [
+#       { "board": "Personal Backlog", "bot_profile": "fetchbot", "admin_profile": "mike_37signals_com" },
+#       { "board": "Work", "bot_profile": "fetchbot_37signals", "admin_profile": "mike_37signals" } ] }
+#
+# A board may be named by its name or its id.
 
 require "json"
 require "open3"
@@ -103,21 +113,25 @@ module FetchWatch
     end
   end
 
+  # One listener for every board; each board's path routes to its own pipeline,
+  # which holds that board's signing secret.
   class Server
-    def initialize(port:, path:, pipeline:)
-      @pipeline = pipeline
+    def initialize(port:)
       @webrick = WEBrick::HTTPServer.new(Port: port, BindAddress: "127.0.0.1",
         Logger: WEBrick::Log.new(File::NULL), AccessLog: [])
-      @webrick.mount_proc(path) { |request, response| handle(request, response) }
+    end
+
+    def mount(path, pipeline)
+      @webrick.mount_proc(path) { |request, response| handle(request, response, pipeline) }
     end
 
     def start = @webrick.start
     def stop = @webrick.shutdown
 
     private
-      def handle(request, response)
+      def handle(request, response, pipeline)
         if request.request_method == "POST"
-          line = @pipeline.process(body: request.body.to_s, signature: request["X-Webhook-Signature"])
+          line = pipeline.process(body: request.body.to_s, signature: request["X-Webhook-Signature"])
           FetchWatch.emit(line) if line
           response.status = 200
         else
@@ -126,97 +140,154 @@ module FetchWatch
       end
   end
 
-  class Runner
-    Options = Data.define(:board, :bot_profile, :admin_profile, :port, :state)
-    DEFAULT_STATE = File.expand_path("~/.config/fizzy/fetch-last.json")
+  # Everything specific to one board: its profiles, identity, webhook, funnel
+  # path, pipeline, and mark.
+  class BoardWatch
+    attr_reader :watch, :account, :board_name
 
-    def self.parse(argv)
-      options = { board: "Backlog", bot_profile: "fetchbot", admin_profile: nil, port: nil, state: DEFAULT_STATE }
-      OptionParser.new do |parser|
-        parser.banner = "usage: fetch-watch [--bot-profile PROFILE] [--admin-profile PROFILE] [--board NAME] [--port PORT] [--state PATH]"
-        parser.on("--bot-profile PROFILE", "fizzy profile of the bot user (default: #{options[:bot_profile]})") { options[:bot_profile] = it }
-        parser.on("--admin-profile PROFILE", "fizzy profile of an account admin, used only to register and remove the webhook (default: the active profile)") { options[:admin_profile] = it }
-        parser.on("--board NAME", "Board to watch (default: #{options[:board]})") { options[:board] = it }
-        parser.on("--port PORT", Integer, "Local port for the webhook listener (default: any free port)") { options[:port] = it }
-        parser.on("--state PATH", "Where the newest event seen is remembered (default: #{DEFAULT_STATE})") { options[:state] = it }
-      end.parse!(argv)
-      Options.new(**options)
+    def initialize(watch, state:)
+      @watch = watch
+      @state = state
     end
 
-    def initialize(options)
-      @options = options
+    def prepare
+      @account = account_for(@watch.bot_profile)
+      @identity = resolve_identity
+      ensure_admin
+      @board_id, @board_name = resolve_board
+      @mark = Mark.load(@state, board: @board_id)
+      @pipeline = Pipeline.new(identity: @identity, secret: nil, mark: @mark, acknowledge: method(:acknowledge))
     end
 
-    def start
-      identity = resolve_identity(@options.bot_profile)
-      ensure_admin(@options.admin_profile)
-      board = resolve_board(@options.board)
-
-      port = @options.port || free_port
+    def listen(server:, port:)
       path = "/fizzy/#{SecureRandom.hex(16)}"
-
       @tunnel = Tunnel.new(path: path, port: port)
-      url = @tunnel.start
-
-      @webhook = Webhook.new(board: board, url: url, admin_profile: @options.admin_profile)
+      @url = @tunnel.start
+      @webhook = Webhook.new(board: @board_id, url: @url, admin_profile: @watch.admin_profile)
       @webhook.register
+      @pipeline.secret = @webhook.signing_secret
+      server.mount(path, @pipeline)
+    end
 
-      mark = Mark.load(@options.state)
-      pipeline = Pipeline.new(identity: identity, secret: @webhook.signing_secret, mark: mark,
-        acknowledge: method(:acknowledge))
-      @server = Server.new(port: port, path: path, pipeline: pipeline)
-      %w[INT TERM].each { |signal| Signal.trap(signal) { @server.stop } }
-      serving = Thread.new { @server.start }
+    def catch_up
+      fetch = ->(page) { fizzy("activity", "list", "--board", @board_id, "--page", page.to_s) }
+      Catchup.new(fetch: fetch, pipeline: @pipeline, mark: @mark).run { |line| FetchWatch.emit(line) }
+    rescue CommandError => error
+      warn "catch-up skipped for #{@board_name}: #{error.message}"
+    end
 
-      catch_up(board, pipeline, mark)
+    def ready
+      warn "Listening for #{@identity.name} on #{@board_name} (account #{@account}) at #{@url}"
+      FetchWatch.emit(%(READY account=#{@account} board="#{@board_name}" #{@url}))
+    end
 
-      warn "Listening for #{identity.name} on #{@options.board} at #{url}"
-      FetchWatch.emit("READY #{url}")
-      serving.join
-    ensure
-      teardown
+    def teardown
+      report_failure("delete webhook for #{@board_name}") { @webhook&.delete }
+      report_failure("close funnel path for #{@board_name}") { @tunnel&.stop }
     end
 
     private
-      def resolve_identity(profile)
-        user = user_for(profile)
-        Identity.new(id: user.fetch("id"), name: user.fetch("name"))
-      rescue CommandError => error
-        abort "no usable fizzy profile #{profile.inspect} for the bot: #{error.message}"
+      def fizzy(*args, profile: @watch.bot_profile)
+        FetchWatch.fizzy(*args, profile: profile)
       end
 
-      def ensure_admin(profile)
-        user = user_for(profile)
-        return if %w[admin owner].include?(user["role"])
-
-        abort "#{profile ? "profile #{profile.inspect}" : "the active profile"} is #{user["name"]} (#{user["role"]}); webhook registration needs an account admin"
+      # The profile decides the account; `identity show` lists every account the
+      # token reaches, so the user has to be picked by that account.
+      def account_for(profile)
+        fizzy("config", "show", profile: profile).fetch("account")
       rescue CommandError => error
-        abort "no usable fizzy profile #{profile.inspect} for webhook registration: #{error.message}"
+        abort "no usable fizzy profile #{profile.inspect}: #{error.message}"
       end
 
-      def user_for(profile)
-        FetchWatch.fizzy("identity", "show", profile: profile).fetch("accounts").first.fetch("user")
+      def identity_on(profile)
+        accounts = fizzy("identity", "show", profile: profile).fetch("accounts")
+        Identity.on_account(@account, accounts) or
+          abort "profile #{profile.inspect} does not reach account #{@account}"
+      rescue CommandError => error
+        abort "no usable fizzy profile #{profile.inspect}: #{error.message}"
+      end
+
+      def resolve_identity
+        identity_on(@watch.bot_profile)
+      end
+
+      def ensure_admin
+        admin_account = account_for(@watch.admin_profile)
+        abort "admin profile #{@watch.admin_profile.inspect} is on account #{admin_account}, not #{@account}" unless admin_account == @account
+
+        admin = identity_on(@watch.admin_profile)
+        return if admin.admin?
+
+        abort "profile #{@watch.admin_profile.inspect} is #{admin.name} (#{admin.role}) on account #{@account}; webhook registration needs an account admin"
+      end
+
+      def resolve_board
+        board = fizzy("board", "list", "--all").find { it["name"] == @watch.board || it["id"] == @watch.board }
+        abort "no board #{@watch.board.inspect} on account #{@account} for profile #{@watch.bot_profile.inspect}" unless board
+        [ board.fetch("id"), board.fetch("name") ]
       end
 
       # A 👀 on the mentioning comment, posted the moment the delivery clears the
       # filters. It says "seen" seconds after Mike hits send, long before a
       # handler has read the card.
       def acknowledge(event)
-        FetchWatch.fizzy("reaction", "create", "--card", event.card_number.to_s,
-          "--comment", event.comment_id, "--content", "👀", profile: @options.bot_profile)
+        fizzy("reaction", "create", "--card", event.card_number.to_s, "--comment", event.comment_id, "--content", "👀")
       end
 
-      def resolve_board(name)
-        board = FetchWatch.fizzy("board", "list", profile: @options.bot_profile).find { it["name"] == name }
-        abort "no board named #{name.inspect}" unless board
-        board.fetch("id")
-      end
-
-      def catch_up(board, pipeline, mark)
-        fetch = ->(page) { FetchWatch.fizzy("activity", "list", "--board", board, "--page", page.to_s, profile: @options.bot_profile) }
-        Catchup.new(fetch: fetch, pipeline: pipeline, mark: mark).run { |line| FetchWatch.emit(line) }
+      def report_failure(what)
+        yield
       rescue CommandError => error
-        warn "catch-up skipped: #{error.message}"
+        warn "failed to #{what}: #{error.message}"
+      end
+  end
+
+  class Runner
+    Options = Data.define(:config, :port, :state)
+    DEFAULT_CONFIG = File.expand_path("~/.config/fizzy/fetch-watch.json")
+    DEFAULT_STATE = File.expand_path("~/.config/fizzy/fetch-last.json")
+
+    def self.parse(argv)
+      options = { config: DEFAULT_CONFIG, port: nil, state: DEFAULT_STATE }
+      OptionParser.new do |parser|
+        parser.banner = "usage: fetch-watch [--config PATH] [--port PORT] [--state PATH]"
+        parser.on("--config PATH", "Watch list: boards with their bot and admin profiles (default: #{DEFAULT_CONFIG})") { options[:config] = it }
+        parser.on("--port PORT", Integer, "Local port for the webhook listener (default: any free port)") { options[:port] = it }
+        parser.on("--state PATH", "Where the newest event seen per board is remembered (default: #{DEFAULT_STATE})") { options[:state] = it }
+      end.parse!(argv)
+      Options.new(**options)
+    end
+
+    def initialize(options)
+      @options = options
+      @boards = []
+    end
+
+    def start
+      @boards = watch_list.map { BoardWatch.new(it, state: @options.state) }
+      @boards.each(&:prepare)
+
+      port = @options.port || free_port
+      @server = Server.new(port: port)
+      @boards.each { it.listen(server: @server, port: port) }
+      %w[INT TERM].each { |signal| Signal.trap(signal) { @server.stop } }
+      serving = Thread.new { @server.start }
+
+      @boards.each do |board|
+        board.catch_up
+        board.ready
+      end
+      serving.join
+    ensure
+      teardown
+    end
+
+    private
+      def watch_list
+        WatchList.parse(File.read(@options.config))
+      rescue Errno::ENOENT
+        abort "no watch list at #{@options.config}; see the header of #{__FILE__} for the format"
+      rescue WatchList::Invalid, JSON::ParserError => error
+        abort "bad watch list #{@options.config}: #{error.message}"
       end
 
       def free_port
@@ -225,14 +296,7 @@ module FetchWatch
 
       def teardown
         @server&.stop
-        report_failure("delete webhook") { @webhook&.delete }
-        report_failure("close funnel path") { @tunnel&.stop }
-      end
-
-      def report_failure(what)
-        yield
-      rescue CommandError => error
-        warn "failed to #{what}: #{error.message}"
+        @boards.each(&:teardown)
       end
   end
 end
