@@ -13,9 +13,41 @@ require "time"
 # mark file. The runtime plumbing (funnel, webhook registration, HTTP server,
 # activity-feed paging) lives in bin/fetch-watch.
 module FetchWatch
-  Identity = Data.define(:id, :name) do
+  Identity = Data.define(:id, :name, :role) do
+    # `identity show` lists every account the token reaches, so the user has
+    # to be picked by account: the bot has a different id on each one.
+    def self.on_account(account, accounts)
+      entry = accounts.find { it["slug"] == "/#{account}" }
+      new(id: entry.dig("user", "id"), name: entry.dig("user", "name"), role: entry.dig("user", "role")) if entry
+    end
+
+    def initialize(id:, name:, role: nil) = super
+
+    def admin? = %w[admin owner].include?(role)
+
     def first_name
       name.to_s.split.first
+    end
+  end
+
+  # The boards to watch, each with the bot profile that reads it and the admin
+  # profile that registers its webhook. Profiles are pinned to one account, so
+  # a board on another account needs its own pair.
+  Watch = Data.define(:board, :bot_profile, :admin_profile)
+
+  module WatchList
+    class Invalid < StandardError; end
+
+    def self.parse(json)
+      entries = JSON.parse(json).fetch("boards", [])
+      raise Invalid, "no boards to watch" if entries.empty?
+
+      entries.map do |entry|
+        %w[board bot_profile admin_profile].each do |key|
+          raise Invalid, "board entry #{entry.inspect} needs #{key}" if entry[key].to_s.empty?
+        end
+        Watch.new(board: entry["board"], bot_profile: entry["bot_profile"], admin_profile: entry["admin_profile"])
+      end
     end
   end
 
@@ -53,10 +85,16 @@ module FetchWatch
     # the last path segment of the URL.
     def card_number
       if comment?
-        eventable.dig("card", "url").to_s[%r{/cards/(\d+)}, 1]&.to_i
+        card_url[%r{/cards/(\d+)}, 1]&.to_i
       else
         eventable["number"]
       end
+    end
+
+    # Card numbers restart per account, so a number alone does not name a card.
+    # The account is the first path segment of the card's URL.
+    def account
+      card_url[%r{https?://[^/]+/(\d+)/cards/}, 1]
     end
 
     # The action says where the card went. The card payload only says where
@@ -89,6 +127,10 @@ module FetchWatch
         @payload.fetch("eventable", {})
       end
 
+      def card_url
+        (comment? ? eventable.dig("card", "url") : eventable["url"]).to_s
+      end
+
       def current_state
         return "Done" if eventable["closed"]
         return "Not Now" if eventable["postponed"]
@@ -104,6 +146,10 @@ module FetchWatch
 
   class Pipeline
     NOTHING = ->(_event) {}
+
+    # The signing secret is issued when the webhook is registered, which happens
+    # after the pipeline exists.
+    attr_writer :secret
 
     # `acknowledge` is called with a live mention the moment it clears the
     # filters, so Mike sees the board react before a handler is even dispatched.
@@ -152,9 +198,9 @@ module FetchWatch
           return log("ignored #{event.id}: comment without mention") unless event.mentions?(@identity)
 
           acknowledge(event) if acknowledge
-          %(MENTION card=#{event.card_number} comment=#{event.comment_id} by="#{event.creator_name}")
+          %(MENTION account=#{event.account} card=#{event.card_number} comment=#{event.comment_id} by="#{event.creator_name}")
         elsif event.transition?
-          %(TRANSITION card=#{event.card_number} state="#{event.card_state}" by="#{event.creator_name}")
+          %(TRANSITION account=#{event.account} card=#{event.card_number} state="#{event.card_state}" by="#{event.creator_name}")
         else
           log("ignored #{event.id}: #{event.action}")
         end
@@ -174,22 +220,28 @@ module FetchWatch
       end
   end
 
-  # Where the watcher left off, so a restart can replay what the board's
-  # activity feed saw in the meantime. Events are timestamped to the
+  # Where the watcher left off on one board, so a restart can replay what that
+  # board's activity feed saw in the meantime. Events are timestamped to the
   # millisecond, so the recent ids disambiguate events sharing the newest
-  # instant.
+  # instant. All boards share one file, keyed by board id.
   class Mark
     RECENT_IDS = 100
+    FILE_LOCK = Mutex.new
 
-    def self.load(path)
-      state = JSON.parse(File.read(path))
-      new(path: path, last_event_at: state["last_event_at"]&.then { Time.iso8601(it) }, recent_ids: state.fetch("recent_ids", []))
-    rescue Errno::ENOENT, JSON::ParserError
-      new(path: path)
+    def self.load(path, board:)
+      state = read(path).dig("boards", board) || {}
+      new(path: path, board: board, last_event_at: state["last_event_at"]&.then { Time.iso8601(it) }, recent_ids: state.fetch("recent_ids", []))
     end
 
-    def initialize(path: nil, last_event_at: nil, recent_ids: [])
+    def self.read(path)
+      JSON.parse(File.read(path))
+    rescue Errno::ENOENT, JSON::ParserError
+      {}
+    end
+
+    def initialize(path: nil, board: nil, last_event_at: nil, recent_ids: [])
       @path = path
+      @board = board
       @last_event_at = last_event_at
       @recent_ids = recent_ids
     end
@@ -216,8 +268,13 @@ module FetchWatch
     def save
       return unless @path
 
-      FileUtils.mkdir_p(File.dirname(@path))
-      File.write(@path, JSON.generate("last_event_at" => @last_event_at&.utc&.iso8601(3), "recent_ids" => @recent_ids))
+      FILE_LOCK.synchronize do
+        FileUtils.mkdir_p(File.dirname(@path))
+        file = Mark.read(@path)
+        boards = file["boards"] ||= {}
+        boards[@board] = { "last_event_at" => @last_event_at&.utc&.iso8601(3), "recent_ids" => @recent_ids }
+        File.write(@path, JSON.generate("boards" => boards))
+      end
     rescue SystemCallError => error
       warn "could not save the mark to #{@path}: #{error.message}"
     end

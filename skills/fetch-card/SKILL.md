@@ -34,15 +34,22 @@ triggers:
 
 Conventions for Fizzy cards that track external reports and notifications. Load the "fizzy" skill before interacting with the application.
 
-These conventions apply to the **Backlog** board only, and every `fizzy` command acts as
-the bot user, never as Mike. The bot is the `fetchbot` profile; Mike's own profile is the
-CLI default, so the bot must be selected explicitly. Export it once per session rather
-than passing `--profile fetchbot` on every call:
+These conventions apply to the backlog boards, one per Fizzy account, and every `fizzy`
+command acts as the bot user, never as Mike. A profile is pinned to one account, so the
+bot has one per board: `fetchbot` for **Personal Backlog** on the personal account
+(6097036) and `fetchbot_37signals` for **Mike's 37signals Backlog** on the 37signals
+account (5986089). Mike's own profile is the CLI default, so the bot must be selected
+explicitly. Export the profile for the board you are working once per session rather
+than passing `--profile` on every call:
 
 ```bash
-export FIZZY_PROFILE=fetchbot
-BOARD=$(fizzy board list --jq '.data[] | select(.name == "Backlog") | .id')
+export FIZZY_PROFILE=fetchbot_37signals
+BOARD=$(fizzy board list --all --jq '.data[] | select(.name == "Mike'"'"'s 37signals Backlog") | .id')
 ```
+
+Card numbers restart per account, so a card is `<account>/<number>`, never a bare
+number: `fizzy card show 419` answers for whichever profile is exported. Card URLs carry
+the account: `https://app.fizzy.do/5986089/cards/12`.
 
 Some pieces of information we need to know:
 
@@ -79,7 +86,7 @@ so all cards related to the "nokogiri" project will start with "nokogiri". The d
 Common tags:
 
 - "oss" for open source projects
-- "37signals" for work-related
+- "37signals" for work-related (every card on the 37signals board)
 - "security" for security-related
 - "review" for requests for review (as in a pull request)
 

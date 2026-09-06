@@ -10,53 +10,60 @@ class FetchWatchTest < ActiveSupport::TestCase
   end
 
   test "a column move is a transition into that column" do
-    assert_equal 'TRANSITION card=113 state="Researching" by="Mike Dalessio"',
+    assert_equal 'TRANSITION account=6097036 card=113 state="Researching" by="Mike Dalessio"',
       process(card_event("card_triaged", column: "Researching"))
   end
 
   test "closing a card is a transition into Done" do
-    assert_equal 'TRANSITION card=113 state="Done" by="Mike Dalessio"',
+    assert_equal 'TRANSITION account=6097036 card=113 state="Done" by="Mike Dalessio"',
       process(card_event("card_closed", column: "In Progress", closed: true))
   end
 
   test "postponing a card is a transition into Not Now" do
-    assert_equal 'TRANSITION card=113 state="Not Now" by="Mike Dalessio"',
+    assert_equal 'TRANSITION account=6097036 card=113 state="Not Now" by="Mike Dalessio"',
       process(card_event("card_postponed", column: "Next", postponed: true))
   end
 
   test "a card with no column is in Maybe?" do
-    assert_equal 'TRANSITION card=113 state="Maybe?" by="Mike Dalessio"',
+    assert_equal 'TRANSITION account=6097036 card=113 state="Maybe?" by="Mike Dalessio"',
       process(card_event("card_sent_back_to_triage", column: nil))
   end
 
   test "a replayed move reports the column it moved to, not the card's current column" do
     payload = card_event("card_triaged", column: "In Progress").merge("particulars" => { "column" => "Researching" })
 
-    assert_equal 'TRANSITION card=113 state="Researching" by="Mike Dalessio"', process(payload)
+    assert_equal 'TRANSITION account=6097036 card=113 state="Researching" by="Mike Dalessio"', process(payload)
   end
 
   test "a replayed close reports Done even if the card has since been reopened" do
-    assert_equal 'TRANSITION card=113 state="Done" by="Mike Dalessio"',
+    assert_equal 'TRANSITION account=6097036 card=113 state="Done" by="Mike Dalessio"',
       process(card_event("card_closed", column: "In Progress", closed: false))
   end
 
   test "a replayed postpone reports Not Now even if the card has since been revived" do
-    assert_equal 'TRANSITION card=113 state="Not Now" by="Mike Dalessio"',
+    assert_equal 'TRANSITION account=6097036 card=113 state="Not Now" by="Mike Dalessio"',
       process(card_event("card_auto_postponed", column: "Next", postponed: false))
   end
 
   test "a reopened card reports its current state" do
-    assert_equal 'TRANSITION card=113 state="Paused" by="Mike Dalessio"',
+    assert_equal 'TRANSITION account=6097036 card=113 state="Paused" by="Mike Dalessio"',
       process(card_event("card_reopened", column: "Paused"))
   end
 
+  test "a card on another account is reported under that account" do
+    payload = card_event("card_triaged", column: "Next")
+    payload["eventable"]["url"] = "https://app.fizzy.do/5986089/cards/113"
+
+    assert_equal 'TRANSITION account=5986089 card=113 state="Next" by="Mike Dalessio"', process(payload)
+  end
+
   test "a comment mentioning me is a mention" do
-    assert_equal 'MENTION card=369 comment=comment-1 by="Mike Dalessio"',
+    assert_equal 'MENTION account=6097036 card=369 comment=comment-1 by="Mike Dalessio"',
       process(comment_event(mention_html("user-harry", "Harry")))
   end
 
   test "a comment mentioning me by plain-text handle is a mention" do
-    assert_equal 'MENTION card=369 comment=comment-1 by="Mike Dalessio"',
+    assert_equal 'MENTION account=6097036 card=369 comment=comment-1 by="Mike Dalessio"',
       process(comment_event("<p>hey</p>", plain_text: "@Harry please look"))
   end
 
@@ -97,7 +104,7 @@ class FetchWatchTest < ActiveSupport::TestCase
 
     line = pipeline.replay(comment_event(mention_html("user-harry", "Harry")))
 
-    assert_equal 'MENTION card=369 comment=comment-1 by="Mike Dalessio"', line
+    assert_equal 'MENTION account=6097036 card=369 comment=comment-1 by="Mike Dalessio"', line
     assert_empty acknowledged
   end
 
@@ -105,7 +112,7 @@ class FetchWatchTest < ActiveSupport::TestCase
     pipeline = FetchWatch::Pipeline.new(identity: HARRY, secret: SECRET, log: StringIO.new,
       acknowledge: ->(_event) { raise "fizzy is down" })
 
-    assert_equal 'MENTION card=369 comment=comment-1 by="Mike Dalessio"',
+    assert_equal 'MENTION account=6097036 card=369 comment=comment-1 by="Mike Dalessio"',
       process(comment_event(mention_html("user-harry", "Harry")), pipeline: pipeline)
   end
 
