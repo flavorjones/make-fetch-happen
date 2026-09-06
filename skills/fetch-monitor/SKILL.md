@@ -35,7 +35,7 @@ list is `~/.config/fizzy/fetch-watch.json`:
 
 ```json
 { "boards": [
-    { "board": "Personal Backlog",         "bot_profile": "fetchbot",           "admin_profile": "mike_37signals_com" },
+    { "board": "Personal Backlog",         "bot_profile": "fetchbot_personal", "admin_profile": "mike_personal" },
     { "board": "Mike's 37signals Backlog", "bot_profile": "fetchbot_37signals", "admin_profile": "mike_37signals" } ] }
 ```
 

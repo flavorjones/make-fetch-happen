@@ -35,7 +35,7 @@
 # admin profile. The watch list lives in ~/.config/fizzy/fetch-watch.json:
 #
 #   { "boards": [
-#       { "board": "Personal Backlog", "bot_profile": "fetchbot", "admin_profile": "mike_37signals_com" },
+#       { "board": "Personal Backlog", "bot_profile": "fetchbot_personal", "admin_profile": "mike_personal" },
 #       { "board": "Work", "bot_profile": "fetchbot_37signals", "admin_profile": "mike_37signals" } ] }
 #
 # A board may be named by its name or its id.

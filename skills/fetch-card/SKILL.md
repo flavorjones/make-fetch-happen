@@ -36,7 +36,7 @@ Conventions for Fizzy cards that track external reports and notifications. Load 
 
 These conventions apply to the backlog boards, one per Fizzy account, and every `fizzy`
 command acts as the bot user, never as Mike. A profile is pinned to one account, so the
-bot has one per board: `fetchbot` for **Personal Backlog** on the personal account
+bot has one per board: `fetchbot_personal` for **Personal Backlog** on the personal account
 (6097036) and `fetchbot_37signals` for **Mike's 37signals Backlog** on the 37signals
 account (5986089). Mike's own profile is the CLI default, so the bot must be selected
 explicitly. Export the profile for the board you are working once per session rather
