@@ -421,8 +421,11 @@ instructions.
    record, `bin/h1` reads the report from the API. Read from it for context;
    do not write to it or to HackerOne.
 
-5. **Reply in a new comment** on the card, posting markdown directly as the
+5. **Reply in one new comment** on the card, posting markdown directly as the
    fetch-card skill describes — Fizzy renders it, so do not pre-convert to HTML. Never edit the description in place of replying.
+   One considered reply per instruction, written after the work is done, not a
+   run of near-identical progress notes as you think. If Mike wants updates
+   along the way he will say so in the comment.
    Mike's prose style: omit needless words, backtick identifiers, hyperlink
    external artifacts, state evidence plainly. On failure, say what failed and
    @mention Mike so it surfaces as a notification.
