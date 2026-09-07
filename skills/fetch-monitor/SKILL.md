@@ -224,13 +224,19 @@ Run the session-side checks from "Trust model": provenance, author, and
 corroboration against Fizzy. Drop anything that fails, with one line in chat
 saying why. Nothing below happens for an unverified line.
 
-### 2. Decide whether the event needs a handler
+### 2. A mention always gets a handler
 
-Every mention does. A transition only does if the state entered has an entry
-action in the fetch-card skill — **In Progress**, **Researching**, **Paused**,
-**In Review**, **Done**, and **Not Now**. A move into **Maybe?**, **Next**, or
-**Pending Release** carries no work; note it and drop it rather than dispatching
-an agent with nothing to do.
+This is not a judgement call. Every verified mention is dispatched to a handler
+(or relayed to the running one), whatever it asks — a one-word question, a
+"trim that down", a status check, something the watching session already knows
+the answer to. The watching session never answers a card comment itself. If it
+has information the handler needs, it puts that in the brief.
+
+The one mechanical filter is on transitions: a transition is dispatched only if
+the state entered has an entry action in the fetch-card skill — **In
+Progress**, **Researching**, **Paused**, **In Review**, **Done**, and **Not
+Now**. A move into **Maybe?**, **Next**, or **Pending Release** carries no work;
+note it and drop it rather than dispatching an agent with nothing to do.
 
 Entry actions fire on *every* entry, so they have to be idempotent: a card that
 bounces out of a state and back in produces two events, and the second must not
@@ -523,6 +529,7 @@ down basecamp-connect's funnel.
 | A mention Mike says he posted never arrived | He edited an existing comment to add the mention. Fizzy has no `comment_updated` webhook action, so an edited-in mention is invisible to the watcher — it only ever sees `comment_created`, which had no mention | Nothing to fix in the watcher; ask him to post a new comment rather than editing one in. The notification tray does record it, if you need to recover one |
 | Old events replayed on every start | Mark file not writable | Check `~/.config/fizzy/fetch-last.json` (one entry per board id); the script prints the write failure on stderr |
 | Watching session stops seeing events | Did the work inline instead of dispatching | Prepare and dispatch only; the subagent does the work |
+| Watching session answered a card comment itself because it "already had the answer" | Treated dispatch as a judgement call | Step 2 is not a decision: every mention goes to a handler. Put what you know in the brief |
 | Two agents fighting over one worktree | Second event on a card dispatched a second agent | `SendMessage` the running `card-ACCOUNT-NUMBER` agent instead |
 | A handler's uncommitted work vanished, or someone else's WIP appeared in its tree | `git stash` — the stack is shared across every worktree of a repo, and `stash push <path>` no-ops silently on an unmodified path so the paired `pop` takes `stash@{0}`, which belongs to someone else | Never `git stash` in a handler. `git checkout -- <path>` to restore a file with no uncommitted work in it; copy aside or `sed` for anything else |
 | Handler cites a sha, column, or commit message that no longer exists | It answered from its last turn's memory; Mike amends, squashes and reorders between events | Re-read the card and `git log --oneline main..HEAD` at the start of every follow-up |
@@ -551,7 +558,7 @@ down basecamp-connect's funnel.
 Watching session:
 
 - [ ] Event verified: a `Monitor` line in one of the two grammars, `account` is in the watch list, `by` is Mike, corroborated with `comment show` / `card show` under that account's bot profile
-- [ ] Event needs a handler (every mention; only transitions with an entry action)
+- [ ] Every mention dispatched or relayed, no exceptions; transitions only for states with an entry action
 - [ ] Repository resolved (frontmatter "repo", or found under `~/code/oss` / `~/Work/basecamp`)
 - [ ] Worktree found or created if the card's state calls for one
 - [ ] Exactly one background agent dispatched, named `card-ACCOUNT-NUMBER`, briefed with the account and the bot profile to export — or, if it could not be dispatched or relayed, a comment posted on the card saying why and what's needed
