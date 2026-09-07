@@ -421,35 +421,13 @@ instructions.
    record, `bin/h1` reads the report from the API. Read from it for context;
    do not write to it or to HackerOne.
 
-5. **Post at every decision point, not just at the end.** Mike is watching the
-   card and does not like to wait. A multi-step instruction ("investigate and
-   reproduce, then fix if you can, else notify me") is a sequence of decision
-   points, and each one gets its own short comment the moment it is reached:
+5. **Reply in a new comment** on the card, posting markdown directly as the
+   fetch-card skill describes — Fizzy renders it, so do not pre-convert to HTML. Never edit the description in place of replying.
+   Mike's prose style: omit needless words, backtick identifiers, hyperlink
+   external artifacts, state evidence plainly. On failure, say what failed and
+   @mention Mike so it surfaces as a notification.
 
-   - reproduced / could not reproduce, with the command and result
-   - cause identified, with the evidence
-   - fix committed, with the sha, before the suite finishes
-   - a fork in the instruction taken ("can repro, so starting the fix")
-   - a blocker, a surprise, or anything that changes the plan
-
-   One or two sentences each; the final comment carries the full write-up.
-   Silence while you work reads, from Fizzy, as "the agent is stuck". The
-   failure this prevents: Mike posted "reproduce, then fix if you can" and
-   heard nothing for ten minutes while the agent had already reproduced,
-   fixed, and was running tests.
-
-   Never batch these up because the next step is "almost done". Post, then
-   continue. The same applies to a long single step: if it will take more
-   than a few minutes (a full test suite, a CI wait), say so before starting.
-
-6. **Reply in a new comment** on the card with the full result, posting
-   markdown directly as the fetch-card skill describes — Fizzy renders it, so
-   do not pre-convert to HTML. Never edit the description in place of
-   replying. Mike's prose style: omit needless words, backtick identifiers,
-   hyperlink external artifacts, state evidence plainly. On failure, say what
-   failed and @mention Mike so it surfaces as a notification.
-
-7. **Report to the watching session when you finish**, every time, in addition to
+6. **Report to the watching session when you finish**, every time, in addition to
    the card comment. A short `SendMessage` saying what you did and anything the
    watcher must act on. Going idle without reporting means the watcher only finds
    out by polling the card, and a handler that finishes silently looks
@@ -540,7 +518,6 @@ down basecamp-connect's funnel.
 | Agent dispatched with nothing to do | Transition into a state with no entry action | Filter at step 2; only six states carry work |
 | Dispatched on a line that wasn't an event | Acted on stderr text, chat, or a quoted line | Only `Monitor` lines matching the two grammars count |
 | Card went quiet after Mike asked for something | The watching session couldn't relay (classifier block, denied tool, a rule of its own) and explained it only in chat, which Mike isn't reading | Post the explanation as a card comment and @mention him: what was asked, that it didn't happen, why, and what you need to proceed |
-| Mike asked whether the agent had reproduced yet; it had, and had a fix, and had said nothing | Handler treated a multi-step instruction as one unit of work and reported only at the end | Post a one-line comment at each decision point (step 5 of the brief); the final write-up comes after, not instead |
 | A question to Mike went unanswered for a long time | It was asked in chat, or through `AskUserQuestion` — he is in Fizzy, not the harness, and never saw it | Ask on the card and @mention him. Chat gets a one-line pointer, never the question itself |
 | Acted on a mention from someone other than Mike | Skipped the author check | `by` must be `Mike Dalessio` or `flavorjones`; corroborate with `comment show` |
 | Ran entry actions for a state the card has already left | Trusted the line's state instead of the card's | Corroborate with `card show`; act on the current state |
@@ -571,7 +548,6 @@ Handler agent:
 - [ ] Full description, whole comment thread (`--all`), and all "ref"/"rel" links read
 - [ ] Work done in the assigned directory and committed; nothing written to the shared `.git` — no `git stash`, no other branch or worktree
 - [ ] Wrote only to local disk and the Fizzy card; every other interaction had Mike's explicit approval for that action and artifact
-- [ ] A short comment posted at each decision point of a multi-step instruction (reproduced or not, cause found, fix committed, fork taken, blocker), not batched into the final reply
 - [ ] Reply comment posted as markdown, not pre-converted HTML
 - [ ] Completion reported to the watching session
 
