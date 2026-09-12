@@ -246,20 +246,37 @@ Add the row if it's missing; ask Mike for the URL if you can't determine it.
 
 **Done** — first confirm every "output" is approved or merged (`gh pr view URL --json
 state,reviewDecision`). If any isn't, leave the card where it is and say so. Otherwise clean
-up the worktree.
+up.
 
-**Not Now** — clean up the worktree. There is nothing to confirm; the decision is not to do
-the work.
+**Not Now** — clean up. There is nothing to confirm; the decision is not to do the work.
 
-Cleaning up the worktree means removing it, deleting its local branch, and dropping the
-"worktree" row from the frontmatter:
+### Cleaning up
+
+Cleaning up means removing the worktree, deleting **every branch the card created, remote as
+well as local**, and dropping the "worktree" row from the frontmatter. Leaving the fork branch
+behind is not cleaning up:
 
 ```bash
 git worktree remove PATH
 git branch -d BRANCH
+git push REMOTE --delete BRANCH
 ```
 
-Use `git branch -D` only after Mike confirms the unmerged work is disposable.
+Find the strays rather than assuming the frontmatter names them all — a card often spawns an
+exploration or prototype branch alongside the one that became the PR:
+
+```bash
+git branch --list "*card-NUMBER*"
+git ls-remote --heads REMOTE | grep card-NUMBER
+```
+
+A squash-merged branch is not an ancestor of `origin/main`, so `git branch -d` refuses it even
+though the work has landed. Confirm the merge by the PR (`gh pr view URL --json state`) and then
+use `-D`.
+
+Delete a branch whose commits are not upstream only after Mike confirms that work is disposable.
+Say which branch and how many commits, and leave it alone until he answers — a stray branch
+belonging to a card that is still open is his, not yours.
 
 ## Golden-ness
 
