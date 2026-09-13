@@ -8,14 +8,26 @@
 # report that already has a card adds a comment to that card instead of
 # creating a duplicate. Either way the notification is marked done so it isn't
 # processed again.
+#
+# Fizzy calls go through the `fizzy` CLI under a named profile, which decides
+# the account and the credentials. Override with --profile and --board.
 
 require "json"
 require "open3"
-require "fizzy"
+require "optparse"
 
-ACCOUNT = "6097036"
-BOARD   = "03f3qct6t4hsg76apuu1jea6w"
-COLUMN  = "maybe"
+options = {
+  profile: "fetchbot_personal",
+  board:   "https://app.fizzy.do/6097036/boards/03f3qct6t4hsg76apuu1jea6w"
+}
+OptionParser.new do |opts|
+  opts.banner = "usage: #{$PROGRAM_NAME} [--profile NAME] [--board URL_OR_ID]"
+  opts.on("--profile NAME", "fizzy CLI profile (default: #{options[:profile]})") { |v| options[:profile] = v }
+  opts.on("--board URL_OR_ID", "board URL or ID (default: #{options[:board]})") { |v| options[:board] = v }
+end.parse!
+
+PROFILE = options[:profile]
+BOARD   = options[:board].split("/").last
 TAGS    = %w[oss security].freeze
 
 def gh_api(*args)
@@ -26,10 +38,15 @@ def gh_api(*args)
   response.strip.empty? ? nil : JSON.parse(response)
 end
 
-token = `op read --account my.1password.com "op://Private/app.fizzy.do API key/password"`.strip
-abort "could not read Fizzy token from 1Password" if token.empty?
+def fizzy(*args)
+  command = ["fizzy", *args, "--quiet", "--profile", PROFILE]
+  stdout, stderr, status = Open3.capture3(*command)
+  raise "`#{command.join(" ")}` failed: #{stderr.strip}" unless status.success?
+  parsed = JSON.parse(stdout)
+  parsed.is_a?(Hash) ? parsed.fetch("data", parsed) : parsed
+end
 
-fizzy = Fizzy.client(access_token: token, base_url: "https://app.fizzy.do")
+cards = fizzy("card", "list", "--board", BOARD, "--all")
 
 count = 0
 before = nil
@@ -60,32 +77,21 @@ loop do
 
     card_title = "#{repo.split('/').last}: #{title}"
 
-    existing = fizzy.cards.list(account_id: ACCOUNT, board_ids: [BOARD])
-                    .find { |c| c["title"] == card_title }
+    existing = cards.find { |c| c["title"] == card_title }
 
     if existing
-      fizzy.comments.create(
-        account_id:  ACCOUNT,
-        card_number: existing["number"],
-        body:        "<p>Someone commented on the report.</p>"
-      )
+      fizzy("comment", "create", "--card", existing["number"].to_s, "--body", "Someone commented on the report.")
       puts "commented ##{existing["number"]}: #{card_title}"
     else
       rel         = "https://github.com/#{repo}/security/advisories"
       description = "<table><tr><td>rel</td><td>#{rel}</td></tr></table>"
 
-      card = fizzy.cards.create(
-        account_id:  ACCOUNT,
-        board_id:    BOARD,
-        column_id:   COLUMN,
-        title:       card_title,
-        description: description
-      )
-      TAGS.each do |tag|
-        fizzy.cards.tag(account_id: ACCOUNT, card_number: card["number"], tag_title: tag)
-      end
-      fizzy.cards.gold(account_id: ACCOUNT, card_number: card["number"])
-      puts "carded ##{card["number"]}: #{card_title}"
+      card = fizzy("card", "create", "--board", BOARD, "--title", card_title, "--description", description)
+      number = card["number"].to_s
+      TAGS.each { |tag| fizzy("card", "tag", number, "--tag", tag) }
+      fizzy("card", "golden", number)
+      cards << card
+      puts "carded ##{number}: #{card_title}"
     end
 
     # Mark the notification done so it isn't processed again.
