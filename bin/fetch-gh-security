@@ -58,8 +58,10 @@ loop do
   break if batch.empty?
 
   # Page by a time cursor, not page number: marking notifications done shrinks
-  # the inbox, which would shift page-number offsets and skip items.
-  oldest = batch.last["updated_at"]
+  # the inbox, which would shift page-number offsets and skip items. Pages are
+  # not sorted by updated_at (and can hold items newer than `before`), so take
+  # the minimum rather than the last element.
+  oldest = batch.map { |n| n["updated_at"] }.min
 
   # Past its served window GitHub stops honoring `before` and replays recent
   # notifications, so the cursor stops moving backward. That's the real end.
