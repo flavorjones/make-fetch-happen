@@ -29,6 +29,11 @@
 # keeps working when it does. An event picked up either way is emitted once --
 # the pipeline dedupes on event id and the mark advances the same way for both.
 #
+# Delivery also needs the funnel hostname to exist at all: Tailscale withdraws
+# the DNS record when the funnel has nothing mounted. So before opening its own
+# paths the script makes sure a permanent /keepalive path is mounted, and never
+# removes it.
+#
 # A `fizzy` profile is pinned to one account, so each board carries its own
 # pair: the bot profile makes every call for that board except webhook
 # registration and removal, which need an account admin there, and so use the
@@ -291,6 +296,7 @@ module FetchWatch
     def start
       @boards = watch_list.map { BoardWatch.new(it, state: @options.state) }
       @boards.each(&:prepare)
+      ensure_keepalive
 
       port = @options.port || free_port
       @server = Server.new(port: port)
@@ -323,6 +329,14 @@ module FetchWatch
 
         warn "polling each activity feed every #{interval}s as a webhook fallback"
         @boards.each { it.poll(interval) }
+      end
+
+      # Mounted once and left alone forever; teardown only touches /fizzy paths.
+      def ensure_keepalive
+        return if Keepalive.mounted?(FetchWatch.run("tailscale", "funnel", "status", "--json"))
+
+        warn "mounting #{Keepalive::PATH} on the funnel so its hostname stays in DNS"
+        FetchWatch.run("tailscale", "funnel", "--bg", "--set-path", Keepalive::PATH, Keepalive::TARGET)
       end
 
       def free_port

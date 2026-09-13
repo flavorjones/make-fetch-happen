@@ -51,6 +51,21 @@ module FetchWatch
     end
   end
 
+  # A path that never goes away, so Tailscale keeps publishing the funnel
+  # hostname in public DNS. With no path mounted the hostname is withdrawn and
+  # the record is gone by morning; a path that comes and goes with a process
+  # only reopens that window. Port 9 is discard: nothing listens, nothing leaks.
+  module Keepalive
+    PATH = "/keepalive"
+    TARGET = "http://127.0.0.1:9"
+
+    def self.mounted?(funnel_status_json)
+      JSON.parse(funnel_status_json).fetch("Web", {}).values.any? do |site|
+        site.dig("Handlers", PATH, "Proxy") == TARGET
+      end
+    end
+  end
+
   module Signature
     def self.valid?(body:, signature:, secret:)
       return false if signature.nil? || secret.nil?

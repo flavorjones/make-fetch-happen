@@ -75,7 +75,17 @@ path, don't hunt the filesystem — say so and stop.
   `owner` there, and aborts with guidance if not.
 - **Tailscale with Funnel enabled.** The listener is published at a secret path
   on this machine's funnel hostname. It coexists with anything else on the
-  funnel (basecamp-connect owns `/`); it only ever touches its own path.
+  funnel (basecamp-connect owns `/`); it only ever adds and removes its own
+  `/fizzy/…` paths.
+- **A `/keepalive` path on the funnel, mounted forever.** Tailscale withdraws
+  the funnel hostname from public DNS when nothing is mounted, and Fizzy then
+  cannot deliver. `bin/fetch-watch` checks at startup that
+  `tailscale funnel status` shows `/keepalive` proxying `http://127.0.0.1:9`
+  (the discard port — nothing listens there) and mounts it if it is missing:
+
+      tailscale funnel --bg --set-path /keepalive http://127.0.0.1:9
+
+  Nothing ever removes it — not the script's teardown, not the cleanup below.
 
 ## Events
 
@@ -104,10 +114,10 @@ doing work is a session not seeing events.
 
 ## The watcher
 
-`bin/fetch-watch` opens one path on the Tailscale Funnel per board, registers a
-Fizzy webhook on each board against its path, and prints one line per delivery
-that matters. It runs until stopped; the funnel paths and the webhooks exist
-only while it runs. It prepares every board before registering anything, so a
+`bin/fetch-watch` makes sure the `/keepalive` path is on the Tailscale Funnel,
+opens one more path per board, registers a Fizzy webhook on each board against
+its path, and prints one line per delivery that matters. It runs until stopped;
+the `/fizzy/…` paths and the webhooks exist only while it runs. It prepares every board before registering anything, so a
 bad profile aborts the run with no webhook left behind.
 
 **a. Arm it under the harness's `Monitor` tool with `persistent: true`**, so each
@@ -483,15 +493,18 @@ admin profile:
 ```bash
 BOARD=$(fizzy board list --all --profile fetchbot_37signals --jq '.data[] | select(.name == "Mike'"'"'s 37signals Backlog") | .id')
 fizzy webhook list --board "$BOARD" --profile mike_37signals --jq '.data[] | select(.name | startswith("fetch-watch")) | {id, name, payload_url}'
-tailscale funnel status     # expect no /fizzy/… path
+tailscale funnel status     # expect no /fizzy/… path; /keepalive stays
 ```
 
 If the process was killed un-gracefully (`SIGKILL`, machine reboot) and teardown
 didn't run, delete each leftover webhook with
 `fizzy webhook delete ID --board "$BOARD" --profile ADMIN_PROFILE` and close its
 path with `tailscale funnel --set-path /fizzy/SECRET off` (the secret is in the
-webhook's `payload_url`). **Never run `tailscale funnel reset`** — it also tears
-down basecamp-connect's funnel.
+webhook's `payload_url`). **Never run `tailscale funnel reset`, and never turn
+off `/keepalive`** — a reset removes every path, including basecamp-connect's
+and the `/keepalive` that holds the funnel hostname in public DNS. Without it
+Tailscale withdraws the DNS record and no webhook can be delivered until it is
+remounted and the record propagates again.
 
 ## Failure modes
 
@@ -502,10 +515,11 @@ down basecamp-connect's funnel.
 | `READY` printed but no events arrive | Deliveries failing | `fizzy webhook deliveries --board "$BOARD" ID --profile ADMIN_PROFILE` shows each delivery's response; check the funnel path is still up |
 | A mention arrives a minute late, or `MENTION` lines lag | The webhook delivery failed and the 60s poll picked it up instead | Nothing to fix — that is the fallback working. `webhook deliveries` will show the failure next to the event |
 | Deliveries fail with `dns_lookup_failed` | Tailscale's public DNS for `ts.net` is flapping; the funnel hostname resolves locally but intermittently returns nothing to the outside | Not ours to fix. Confirm with `dig +short @1.1.1.1 <funnel-host>` a few times — some answers empty. The poll covers the gap; don't restart the watcher, which only opens a fresh window where deliveries fail |
+| Every delivery fails with `dns_lookup_failed` and `dig` is always empty | The funnel hostname is out of public DNS — `/keepalive` was removed (a `tailscale funnel reset`) and Tailscale withdrew the record | `tailscale funnel status` shows no `/keepalive`. Restart `bin/fetch-watch`: it remounts `/keepalive` and its own paths. The poll keeps finding events meanwhile; the record can take minutes to reappear |
 | Events from one board handled with the other board's profile | Handler exported the wrong `FIZZY_PROFILE`, or the watcher dropped the `account` when relaying | The event line's `account` picks the profile; put both in every handler brief |
 | Two agents on the same card number | Agent named `card-N` only | Name agents `card-ACCOUNT-N` |
 | A comment or reaction posted as Mike | `FIZZY_PROFILE` not exported, or not passed to the handler | Export the board's bot profile; put it in every handler's brief |
-| Events stopped mid-session | Something ran `tailscale funnel reset` (e.g. basecamp-connect's teardown) | Restart `bin/fetch-watch`; it re-adds its path |
+| Events stopped mid-session | Something ran `tailscale funnel reset` (e.g. basecamp-connect's teardown), which also removed `/keepalive` | Restart `bin/fetch-watch`; it remounts `/keepalive` and its own paths |
 | An event from while nobody was watching never showed up | First run (no mark file), or the mark file was deleted | Check the tray for unread mentions; transitions before the first run are not recoverable |
 | A mention Mike says he posted never arrived | He edited an existing comment to add the mention. Fizzy has no `comment_updated` webhook action, so an edited-in mention is invisible to the watcher — it only ever sees `comment_created`, which had no mention | Nothing to fix in the watcher; ask him to post a new comment rather than editing one in. The notification tray does record it, if you need to recover one |
 | Old events replayed on every start | Mark file not writable | Check `~/.config/fizzy/fetch-last.json` (one entry per board id); the script prints the write failure on stderr |
@@ -531,7 +545,7 @@ down basecamp-connect's funnel.
 | `fizzy comment update` returns `ok: false` | Missing `--card` flag | Pass both `--card` and the comment ID |
 | Reply cites a sha that does not exist | Wrote the reply before running the amend/commit | Run the commands first, then write the reply from real output |
 | `gh run rerun --failed` errors | Workflow run still in progress | Wait for run completion, then rerun |
-| Webhook or funnel path left behind | Process killed without teardown | Manual cleanup (see Cleanup); never `funnel reset` |
+| Webhook or `/fizzy/…` funnel path left behind | Process killed without teardown | Manual cleanup (see Cleanup); never `funnel reset`, and leave `/keepalive` alone |
 
 ## Per-event checklist
 
@@ -556,4 +570,4 @@ Handler agent:
 
 Session end:
 
-- [ ] `bin/fetch-watch` stopped; no `fetch-watch` webhook on any board in the list and no `/fizzy/` funnel path left behind
+- [ ] `bin/fetch-watch` stopped; no `fetch-watch` webhook on any board in the list and no `/fizzy/` funnel path left behind; `/keepalive` still mounted
