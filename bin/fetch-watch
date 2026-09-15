@@ -26,8 +26,11 @@
 # process runs, which is the fallback for a webhook delivery that never arrives.
 # Inbound delivery depends on the funnel hostname resolving publicly, and that
 # has been observed to fail intermittently; polling is outbound only, so it
-# keeps working when it does. An event picked up either way is emitted once --
-# the pipeline dedupes on event id and the mark advances the same way for both.
+# keeps working when it does. Each poll rescans a fixed window as well as
+# everything past the mark, because every delivery advances the mark and a
+# failed delivery would be behind it as soon as the next one succeeded. An
+# event picked up either way is emitted once -- the pipeline dedupes on event
+# id and the mark advances the same way for both.
 #
 # Delivery also needs the funnel hostname to exist at all: Tailscale withdraws
 # the DNS record when the funnel has nothing mounted. So before opening its own
@@ -181,9 +184,9 @@ module FetchWatch
       server.mount(path, @pipeline)
     end
 
-    def catch_up(acknowledge: false)
+    def catch_up(acknowledge: false, since: nil)
       fetch = ->(page) { fizzy("activity", "list", "--board", @board_id, "--page", page.to_s) }
-      Catchup.new(fetch: fetch, pipeline: @pipeline, mark: @mark, acknowledge: acknowledge).run { |line| FetchWatch.emit(line) }
+      Catchup.new(fetch: fetch, pipeline: @pipeline, mark: @mark, acknowledge: acknowledge, since: since).run { |line| FetchWatch.emit(line) }
     rescue CommandError => error
       warn "catch-up skipped for #{@board_name}: #{error.message}"
     end
@@ -193,11 +196,20 @@ module FetchWatch
     # so it still finds the event when DNS is failing. Anything the webhook
     # did deliver is already in the pipeline's seen-set, so polling costs a
     # request and emits nothing.
-    def poll(interval)
+    #
+    # It scans a fixed window as well as everything past the mark. Every
+    # delivery advances the mark, so a failed delivery is already behind it by
+    # the time the next one lands, and the mark alone would step straight over
+    # the event the poll exists to find. The mark still earns its keep when
+    # nothing advances it -- webhooks down and polls failing for longer than the
+    # window. The window never reaches back before this run started, so a first
+    # run still replays nothing.
+    def poll(interval, window)
+      started_at = Time.now
       @poller = Thread.new do
         loop do
           sleep interval
-          catch_up(acknowledge: true)
+          catch_up(acknowledge: true, since: [ Time.now - window, started_at ].max)
         rescue => error
           warn "poll failed for #{@board_name}: #{error.message}"
         end
@@ -271,19 +283,21 @@ module FetchWatch
   end
 
   class Runner
-    Options = Data.define(:config, :port, :state, :poll)
+    Options = Data.define(:config, :port, :state, :poll, :window)
     DEFAULT_CONFIG = File.expand_path("~/.config/fizzy/fetch-watch.json")
     DEFAULT_STATE = File.expand_path("~/.config/fizzy/fetch-last.json")
     DEFAULT_POLL = 60
+    DEFAULT_WINDOW = 600
 
     def self.parse(argv)
-      options = { config: DEFAULT_CONFIG, port: nil, state: DEFAULT_STATE, poll: DEFAULT_POLL }
+      options = { config: DEFAULT_CONFIG, port: nil, state: DEFAULT_STATE, poll: DEFAULT_POLL, window: DEFAULT_WINDOW }
       OptionParser.new do |parser|
-        parser.banner = "usage: fetch-watch [--config PATH] [--port PORT] [--state PATH] [--poll SECONDS]"
+        parser.banner = "usage: fetch-watch [--config PATH] [--port PORT] [--state PATH] [--poll SECONDS] [--window SECONDS]"
         parser.on("--config PATH", "Watch list: boards with their bot and admin profiles (default: #{DEFAULT_CONFIG})") { options[:config] = it }
         parser.on("--port PORT", Integer, "Local port for the webhook listener (default: any free port)") { options[:port] = it }
         parser.on("--state PATH", "Where the newest event seen per board is remembered (default: #{DEFAULT_STATE})") { options[:state] = it }
         parser.on("--poll SECONDS", Integer, "How often to poll each activity feed for deliveries the webhook missed; 0 disables (default: #{DEFAULT_POLL})") { options[:poll] = it }
+        parser.on("--window SECONDS", Integer, "How far back each poll rescans for a delivery that failed (default: #{DEFAULT_WINDOW})") { options[:window] = it }
       end.parse!(argv)
       Options.new(**options)
     end
@@ -327,8 +341,9 @@ module FetchWatch
         interval = @options.poll.to_i
         return warn("polling disabled") unless interval.positive?
 
-        warn "polling each activity feed every #{interval}s as a webhook fallback"
-        @boards.each { it.poll(interval) }
+        window = [ @options.window.to_i, interval ].max
+        warn "polling each activity feed every #{interval}s over a #{window}s window as a webhook fallback"
+        @boards.each { it.poll(interval, window) }
       end
 
       # Mounted once and left alone forever; teardown only touches /fizzy paths.

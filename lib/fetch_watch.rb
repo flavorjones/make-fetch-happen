@@ -300,16 +300,24 @@ module FetchWatch
   class Catchup
     MAX_PAGES = 20
 
-    def initialize(fetch:, pipeline:, mark:, max_pages: MAX_PAGES, acknowledge: false)
+    # `since` adds a fixed window to the scan, which otherwise reaches back only
+    # to the mark. The poller needs that: the mark advances on every delivery,
+    # so a delivery that failed is behind the mark as soon as the next one
+    # succeeds, and a mark-bounded scan would never look back far enough to find
+    # it. The mark stays in play for the reverse case -- nothing advancing it
+    # for longer than the window. The overlap rescans what the webhook already
+    # delivered, which costs nothing -- the pipeline drops those on its seen-set.
+    def initialize(fetch:, pipeline:, mark:, max_pages: MAX_PAGES, acknowledge: false, since: nil)
       @fetch = fetch
       @pipeline = pipeline
       @mark = mark
       @max_pages = max_pages
       @acknowledge = acknowledge
+      @since = since
     end
 
     def run
-      if @mark.empty?
+      if @since.nil? && @mark.empty?
         newest = @fetch.call(1).first
         @mark.record(Event.new(newest)) if newest
       else
@@ -326,10 +334,18 @@ module FetchWatch
         events = []
         (1..@max_pages).each do |page|
           batch = @fetch.call(page)
-          events.concat(batch.select { @mark.replay?(it) })
-          break if batch.empty? || !@mark.replay?(batch.last)
+          events.concat(batch.select { replay?(it) })
+          break if batch.empty? || !replay?(batch.last)
         end
         events
+      end
+
+      def replay?(payload)
+        return true if @mark.replay?(payload)
+        return false if @since.nil?
+
+        created_at = Event.new(payload).created_at
+        !created_at.nil? && created_at >= @since
       end
   end
 end

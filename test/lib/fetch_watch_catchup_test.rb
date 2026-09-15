@@ -94,6 +94,51 @@ class FetchWatchCatchupTest < ActiveSupport::TestCase
     assert_equal [ "e2" ], acknowledged
   end
 
+  test "a poll finds an event the mark has already passed" do
+    @mark.record(FetchWatch::Event.new(move("e1", "10:01", "Next")))
+    dropped = mention("e2", "10:02")
+    delivered = move("e3", "10:03", "Paused")
+    body = JSON.generate(delivered)
+    @pipeline.process(body: body, signature: OpenSSL::HMAC.hexdigest("SHA256", "s3cret", body))
+
+    lines = catch_up(pages: [ [ delivered, dropped ] ], since: Time.iso8601("2026-08-21T10:00:00.000Z"))
+
+    assert_equal [ 'MENTION account=6097036 card=113 comment=c-e2 by="Mike Dalessio"' ], lines
+  end
+
+  test "a poll ignores events older than its window" do
+    @mark.record(FetchWatch::Event.new(move("e1", "10:01", "Next")))
+
+    lines = catch_up(pages: [ [ move("e2", "10:02", "Paused"), move("e0", "09:30", "Next") ] ],
+      since: Time.iso8601("2026-08-21T10:00:00.000Z"))
+
+    assert_equal [ 'TRANSITION account=6097036 card=113 state="Paused" by="Mike Dalessio"' ], lines
+  end
+
+  test "a poll stops paging once a page ends before its window" do
+    pages = [ [ move("e2", "10:02", "Paused") ], [ move("e0", "09:30", "Next") ], [ move("e-1", "09:00", "Next") ] ]
+    requested = []
+    fetch = ->(page) { requested << page; pages[page - 1] || [] }
+    FetchWatch::Catchup.new(fetch: fetch, pipeline: @pipeline, mark: @mark,
+      since: Time.iso8601("2026-08-21T10:00:00.000Z")).run
+
+    assert_equal [ 1, 2 ], requested
+  end
+
+  test "a poll still replays everything past a mark the window has outrun" do
+    @mark.record(FetchWatch::Event.new(move("e1", "10:00", "Next")))
+
+    lines = catch_up(pages: [ [ move("e4", "10:25", "Done"), move("e3", "10:10", "Paused"),
+                                move("e2", "10:05", "In Progress"), move("e1", "10:00", "Next") ] ],
+      since: Time.iso8601("2026-08-21T10:20:00.000Z"))
+
+    assert_equal [
+      'TRANSITION account=6097036 card=113 state="In Progress" by="Mike Dalessio"',
+      'TRANSITION account=6097036 card=113 state="Paused" by="Mike Dalessio"',
+      'TRANSITION account=6097036 card=113 state="Done" by="Mike Dalessio"'
+    ], lines
+  end
+
   test "the startup catch-up does not acknowledge what it replays" do
     @mark.record(FetchWatch::Event.new(move("e1", "10:01", "Next")))
     acknowledged = []
@@ -107,10 +152,10 @@ class FetchWatchCatchupTest < ActiveSupport::TestCase
   end
 
   private
-    def catch_up(pages:, pipeline: @pipeline, acknowledge: false)
+    def catch_up(pages:, pipeline: @pipeline, acknowledge: false, since: nil)
       fetch = ->(page) { pages[page - 1] || [] }
       lines = []
-      FetchWatch::Catchup.new(fetch: fetch, pipeline: pipeline, mark: @mark, acknowledge: acknowledge).run { |line| lines << line }
+      FetchWatch::Catchup.new(fetch: fetch, pipeline: pipeline, mark: @mark, acknowledge: acknowledge, since: since).run { |line| lines << line }
       lines
     end
 
