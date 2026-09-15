@@ -194,8 +194,15 @@ module FetchWatch
     # `acknowledge` off, because those events may be hours old and Mike has
     # already moved on; the poller turns it on, because an event it picks up is
     # one the webhook just failed to deliver and the receipt is still wanted.
-    def replay(payload, acknowledge: false)
-      @lock.synchronize { handle(Event.new(payload), acknowledge: acknowledge) }
+    #
+    # `polled` names the emitted line on stderr. Stdout reads the same whichever
+    # path found the event, so without it a line that arrives late says nothing
+    # about whether the webhook delivered it.
+    def replay(payload, acknowledge: false, polled: false)
+      event = Event.new(payload)
+      line = @lock.synchronize { handle(event, acknowledge: acknowledge) }
+      log("polled #{event.id}: #{line}") if polled && line
+      line
     end
 
     private
@@ -307,13 +314,14 @@ module FetchWatch
     # it. The mark stays in play for the reverse case -- nothing advancing it
     # for longer than the window. The overlap rescans what the webhook already
     # delivered, which costs nothing -- the pipeline drops those on its seen-set.
-    def initialize(fetch:, pipeline:, mark:, max_pages: MAX_PAGES, acknowledge: false, since: nil)
+    def initialize(fetch:, pipeline:, mark:, max_pages: MAX_PAGES, acknowledge: false, since: nil, polled: false)
       @fetch = fetch
       @pipeline = pipeline
       @mark = mark
       @max_pages = max_pages
       @acknowledge = acknowledge
       @since = since
+      @polled = polled
     end
 
     def run
@@ -322,7 +330,7 @@ module FetchWatch
         @mark.record(Event.new(newest)) if newest
       else
         missed.reverse_each do |payload|
-          line = @pipeline.replay(payload, acknowledge: @acknowledge)
+          line = @pipeline.replay(payload, acknowledge: @acknowledge, polled: @polled)
           yield line if line && block_given?
         end
       end

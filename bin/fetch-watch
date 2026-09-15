@@ -30,7 +30,8 @@
 # everything past the mark, because every delivery advances the mark and a
 # failed delivery would be behind it as soon as the next one succeeded. An
 # event picked up either way is emitted once -- the pipeline dedupes on event
-# id and the mark advances the same way for both.
+# id and the mark advances the same way for both. A line the poll emitted is
+# named on stderr, so a late line says which path found it.
 #
 # Delivery also needs the funnel hostname to exist at all: Tailscale withdraws
 # the DNS record when the funnel has nothing mounted. So before opening its own
@@ -184,9 +185,10 @@ module FetchWatch
       server.mount(path, @pipeline)
     end
 
-    def catch_up(acknowledge: false, since: nil)
+    def catch_up(acknowledge: false, since: nil, polled: false)
       fetch = ->(page) { fizzy("activity", "list", "--board", @board_id, "--page", page.to_s) }
-      Catchup.new(fetch: fetch, pipeline: @pipeline, mark: @mark, acknowledge: acknowledge, since: since).run { |line| FetchWatch.emit(line) }
+      Catchup.new(fetch: fetch, pipeline: @pipeline, mark: @mark, acknowledge: acknowledge, since: since,
+        polled: polled).run { |line| FetchWatch.emit(line) }
     rescue CommandError => error
       warn "catch-up skipped for #{@board_name}: #{error.message}"
     end
@@ -209,7 +211,7 @@ module FetchWatch
       @poller = Thread.new do
         loop do
           sleep interval
-          catch_up(acknowledge: true, since: [ Time.now - window, started_at ].max)
+          catch_up(acknowledge: true, polled: true, since: [ Time.now - window, started_at ].max)
         rescue => error
           warn "poll failed for #{@board_name}: #{error.message}"
         end

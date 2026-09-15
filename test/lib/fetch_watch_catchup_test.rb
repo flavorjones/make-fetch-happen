@@ -7,7 +7,8 @@ class FetchWatchCatchupTest < ActiveSupport::TestCase
   setup do
     @path = Rails.root.join("tmp", "fetch-watch-catchup-test-#{SecureRandom.hex(4)}.json")
     @mark = FetchWatch::Mark.load(@path, board: "board-1")
-    @pipeline = FetchWatch::Pipeline.new(identity: HARRY, secret: "s3cret", mark: @mark, log: StringIO.new)
+    @log = StringIO.new
+    @pipeline = FetchWatch::Pipeline.new(identity: HARRY, secret: "s3cret", mark: @mark, log: @log)
   end
 
   teardown do
@@ -151,11 +152,38 @@ class FetchWatchCatchupTest < ActiveSupport::TestCase
     assert_empty acknowledged
   end
 
+  test "a polled emit names the event id and the line it emitted" do
+    @mark.record(FetchWatch::Event.new(move("e1", "10:01", "Next")))
+
+    catch_up(pages: [ [ move("e2", "10:02", "Paused") ] ], polled: true)
+
+    assert_includes @log.string,
+      %(polled e2: TRANSITION account=6097036 card=113 state="Paused" by="Mike Dalessio"\n)
+  end
+
+  test "a delivered event is not reported as polled" do
+    delivered = move("e2", "10:02", "Paused")
+    body = JSON.generate(delivered)
+
+    @pipeline.process(body: body, signature: OpenSSL::HMAC.hexdigest("SHA256", "s3cret", body))
+
+    refute_includes @log.string, "polled"
+  end
+
+  test "the startup catch-up does not report what it replays as polled" do
+    @mark.record(FetchWatch::Event.new(move("e1", "10:01", "Next")))
+
+    catch_up(pages: [ [ move("e2", "10:02", "Paused") ] ])
+
+    refute_includes @log.string, "polled"
+  end
+
   private
-    def catch_up(pages:, pipeline: @pipeline, acknowledge: false, since: nil)
+    def catch_up(pages:, pipeline: @pipeline, acknowledge: false, since: nil, polled: false)
       fetch = ->(page) { pages[page - 1] || [] }
       lines = []
-      FetchWatch::Catchup.new(fetch: fetch, pipeline: pipeline, mark: @mark, acknowledge: acknowledge, since: since).run { |line| lines << line }
+      FetchWatch::Catchup.new(fetch: fetch, pipeline: pipeline, mark: @mark, acknowledge: acknowledge, since: since,
+        polled: polled).run { |line| lines << line }
       lines
     end
 
