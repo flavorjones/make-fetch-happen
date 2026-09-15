@@ -143,6 +143,39 @@ Raw HTML passes through, so an `<action-text-attachment>` tag written by hand st
 Card descriptions still need HTML for the frontmatter table — see "Frontmatter" — because
 its Lexxy markup has no markdown equivalent.
 
+### Spacing
+
+Fizzy renders adjacent `<p>` blocks with no gap, so a body written as plain markdown
+arrives as a wall of text. Put a literal `<p><br></p>` line between every pair of blocks —
+paragraphs, lists, and code fences alike. It is raw HTML, so it survives the markdown pass
+and becomes the blank line the renderer will not give you.
+
+Without spacers:
+
+```markdown
+Confirmed on `v2.14.0`. The overflow is in the length prefix.
+
+Two call sites are affected:
+
+- `parse` truncates
+- `dump` raises
+```
+
+With them:
+
+```markdown
+Confirmed on `v2.14.0`. The overflow is in the length prefix.
+
+<p><br></p>
+
+Two call sites are affected:
+
+<p><br></p>
+
+- `parse` truncates
+- `dump` raises
+```
+
 ### Drafts for approval
 
 A draft that Mike will approve and then send somewhere else — a GitHub or advisory
