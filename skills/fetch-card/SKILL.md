@@ -98,6 +98,7 @@ The card description should always start with an HTML table to track key/value p
 - "rel" is for related information, such as an RFC
 - "worktree" is for work in progress, the absolute path on disk to the directory in which the work is happening
 - "output" is for work that is pending review, for example the URL for a pull request generated for the fix
+- "is blocked by" and "blocks" are for dependencies between cards — see "Dependencies"
 
 The table is Lexxy rich text. Each row is a header cell holding the key and a data cell holding the value:
 
@@ -107,6 +108,10 @@ The table is Lexxy rich text. Each row is a header cell holding the key and a da
 </tbody></table></figure>
 ```
 
+One value per row. A key that needs several values — two "rel" links, three "blocks" —
+gets one row per value, repeating the key, rather than several values stacked in a single
+cell. Repeated keys are expected and read correctly; a crowded cell does not.
+
 Only the table has to be HTML — the rest of the description can be markdown in the same file, and Fizzy renders it. See "Comments".
 
 When updating an existing card, preserve the description's existing HTML structure and add or edit rows rather than rewriting the description. Write the full description to a file and update with:
@@ -114,6 +119,31 @@ When updating an existing card, preserve the description's existing HTML structu
     fizzy card update NUMBER --description_file path.html
 
 Frontmatter rows are added and removed by the state machine's entry actions — see "State".
+
+### Dependencies
+
+When one card cannot proceed until another is finished, record it on **both** cards: "is
+blocked by" on the card that is waiting, "blocks" on the card being waited on. A dependency
+recorded on only one side is invisible from the other, which is exactly when it matters —
+you finish a card without knowing what it unblocks.
+
+Each value is a link to the other card, with the card number and a short label so the row
+is readable without following it. A card that blocks three others gets three "blocks" rows
+— never three links stacked in one cell:
+
+```html
+<tr><th class="lexxy-content__table-cell--header"><p>blocks</p></th><td><p><a href="https://app.fizzy.do/6097036/cards/478">#478 — loofah: allow boolean and empty attributes</a></p></td></tr>
+<tr><th class="lexxy-content__table-cell--header"><p>blocks</p></th><td><p><a href="https://app.fizzy.do/6097036/cards/510">#510 — loofah: HTML5 empty attributes are being scrubbed</a></p></td></tr>
+```
+
+Record a dependency only where one exists in fact — a thread that says the work is waiting
+on another thread, or an entry action that cannot run until another card's output lands.
+Two cards on the same subject are duplicates or siblings, not a blocking pair; use "rel"
+for those.
+
+Both sides have to move together. When you add, change, or remove one direction, update the
+other in the same pass, and when a card reaches "Done" or "Not Now", drop it from the "is
+blocked by" row of every card it was blocking.
 
 ## Comments
 
