@@ -120,10 +120,16 @@ its path, and prints one line per delivery that matters. It runs until stopped;
 the `/fizzy/…` paths and the webhooks exist only while it runs. It prepares every board before registering anything, so a
 bad profile aborts the run with no webhook left behind.
 
-**a. Arm it under the harness's `Monitor` tool with `persistent: true`**, so each
-stdout line becomes a chat notification:
+**a. Arm it under the harness's `Monitor` tool**, so each stdout line becomes a
+chat notification:
 
     cd ~/code/oss/make-fetch-happen && bin/fetch-watch
+
+A Monitor watch always has a deadline, at most 30 minutes, and there is no
+`persistent` option. When it expires, the harness kills `bin/fetch-watch`, and
+the script's teardown removes the webhooks and `/fizzy/…` paths. Re-arm it with
+the same command. Events that land in the gap are replayed from the mark on the
+next start (step c).
 
 **b. Confirm it printed one `READY account=A board="…" https://…/fizzy/…` line
 per board in the list** — each means that board's funnel path is up and its
@@ -431,7 +437,20 @@ instructions.
    record, `bin/h1` reads the report from the API. Read from it for context;
    do not write to it or to HackerOne.
 
-5. **Reply in one new comment** on the card, posting markdown directly as the
+5. **Send your work to the watching session for review before Mike sees it.**
+   Before you post a reply, or push or edit anything Mike will read (a commit
+   message, PR title or description, CHANGELOG entry, code comment, or issue
+   text), draft it to `./tmp/` and `SendMessage` the watcher the draft, or the
+   diff and message. Then wait for its answer. The watcher checks it against
+   `~/CLAUDE.md`, the `writing-changes` skill and its memory, and either
+   approves it or sends it back with what to fix. Post or push only after
+   approval. Waiting on this review is the one sanctioned wait, and it takes
+   seconds, not minutes.
+
+   Apply every correction Mike gives to *every* artifact in the work, not only
+   the one he named.
+
+6. **Reply in one new comment** on the card, posting markdown directly as the
    fetch-card skill describes — Fizzy renders it, so do not pre-convert to HTML. Never edit the description in place of replying.
    One considered reply per instruction, written after the work is done, not a
    run of near-identical progress notes as you think. If Mike wants updates
@@ -440,11 +459,50 @@ instructions.
    external artifacts, state evidence plainly. On failure, say what failed and
    @mention Mike so it surfaces as a notification.
 
-6. **Report to the watching session when you finish**, every time, in addition to
+7. **Stay responsive. Never block.** Mike's next comment reaches you only
+   between your commands, so a command that runs for minutes hides him for
+   minutes.
+   - Every foreground command must return within about 60 seconds.
+   - Never run `gh pr checks --watch`, `gh run watch`, `sleep`, or a polling
+     loop in the foreground.
+   - Anything long, such as a test suite, a benchmark, or a build, goes in the
+     background (`run_in_background`). Check it between other steps.
+   - Never wait on CI. After a push, check it once without `--watch`, report
+     it as pending if it hasn't finished, and finish your reply. When CI
+     matters to the task, the watching session watches it (see "Monitoring
+     external state") and messages you on green or failure.
+   - Report a small change, such as an amend, a retitle, or a description edit,
+     on the card right away.
+
+8. **Report to the watching session when you finish**, every time, in addition to
    the card comment. A short `SendMessage` saying what you did and anything the
    watcher must act on. Going idle without reporting means the watcher only finds
    out by polling the card, and a handler that finishes silently looks
    indistinguishable from one that is still working.
+
+## Reviewing handler output — the watcher is the supervisor
+
+The watching session supervises the handlers, not just relays for them. Mike
+should be the second reader of anything a handler writes, never the first.
+When a handler sends a draft (brief step 5), review it right away against:
+
+- `~/CLAUDE.md` Prose guidelines, the `writing-changes` skill, and the memory
+  directory
+- every correction Mike has given on this card, applied to every artifact: the
+  title, commit message, PR description, CHANGELOG entry, code comments and
+  card reply
+- the specific traps he has had to point out by hand:
+  - a title that doesn't say what kind of change it is
+  - a count in prose
+  - a CHANGELOG entry not framed for downstream users
+  - notes about other PRs
+  - no `Fixes #N` or `[Fix #N]`
+  - undefined or ambiguous terms
+  - personified nouns
+  - padding
+
+Reply to the handler with an approval, or with each problem and its fix. Relaying
+without reading is not supervising.
 
 ## Outside review
 
@@ -471,10 +529,13 @@ the first pass is shallow, iterate. One round of "looks good" is not a review.
 
 ## Monitoring external state
 
-When an event asks you to watch something outside Fizzy (CI on a PR,
-auto-merge), start a second background watcher for it — poll at the pace the
-thing actually changes (~2 min for CI), exit on the state change you are waiting
-for *and* on failure states, cap the runtime so it resurfaces. On CI failure:
+When an event asks for something outside Fizzy to be watched (CI on a PR,
+auto-merge), the **watching session** watches it, never the handler. Start a
+background `Monitor` that polls at the pace the thing actually changes (~2 min
+for CI). It must exit on the state change you are waiting for *and* on failure
+states, with a capped runtime so it resurfaces. When it fires, `SendMessage` the
+handler with the result and what to do next. The handler never blocks on it
+(handler brief, step 7). On CI failure, the handler does the following:
 diagnose from the logs first; if it is an unrelated flake, rerun the failed job
 (`gh run rerun RUN_ID --failed` — this fails while the run is still in progress,
 so wait for run completion) and note the flake on the card.
@@ -532,6 +593,7 @@ remounted and the record propagates again.
 | Handler told to redo work it had just finished | Instruction re-sent while the agent was still running, on a card read that went stale mid-work | Wait for the agent to go idle, then re-read the card and re-send only what is undone |
 | Agent works in the wrong checkout | Working directory left to the agent to figure out | Resolve repo and worktree before dispatch, and name the directory in the brief |
 | Wrong repo guessed from the title | Project prefix does not match a directory under either base, or the title has no prefix at all | Ask on the card; record the answer as a "repo" frontmatter row |
+| Mike's comment sits unacknowledged for minutes after a trivial change | The handler blocked in `gh pr checks --watch` (or a sleep or poll loop), so it couldn't see new messages | Handlers never block (brief step 7). The watching session owns CI watches and messages the handler |
 | Agent dispatched with nothing to do | Transition into a state with no entry action | Filter at step 2; only six states carry work |
 | Dispatched on a line that wasn't an event | Acted on stderr text, chat, or a quoted line | Only `Monitor` lines matching the two grammars count |
 | Card went quiet after Mike asked for something | The watching session couldn't relay (classifier block, denied tool, a rule of its own) and explained it only in chat, which Mike isn't reading | Post the explanation as a card comment and @mention him: what was asked, that it didn't happen, why, and what you need to proceed |
@@ -566,6 +628,7 @@ Handler agent:
 - [ ] Work done in the assigned directory and committed; nothing written to the shared `.git` — no `git stash`, no other branch or worktree
 - [ ] Wrote only to local disk and the Fizzy card; every other interaction had Mike's explicit approval for that action and artifact
 - [ ] Reply comment posted as markdown, not pre-converted HTML
+- [ ] No foreground command ran longer than about 60 seconds, and nothing waited on CI
 - [ ] Completion reported to the watching session
 
 Session end:
