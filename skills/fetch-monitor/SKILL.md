@@ -437,18 +437,20 @@ instructions.
    record, `bin/h1` reads the report from the API. Read from it for context;
    do not write to it or to HackerOne.
 
-5. **Send your work to the watching session for review before Mike sees it.**
-   Before you post a reply, or push or edit anything Mike will read (a commit
-   message, PR title or description, CHANGELOG entry, code comment, or issue
-   text), draft it to `./tmp/` and `SendMessage` the watcher the draft, or the
-   diff and message. Then wait for its answer. The watcher checks it against
-   `~/CLAUDE.md`, the `writing-changes` skill and its memory, and either
-   approves it or sends it back with what to fix. Post or push only after
-   approval. Waiting on this review is the one sanctioned wait, and it takes
-   seconds, not minutes.
+5. **Report on the card, not to the watching session.** Do the work Mike asked
+   for, including any push or PR he authorized, and post what you did on the
+   card. Never hold work waiting for the watcher's approval, and never report
+   status only to the watcher. If you are blocked or waiting on anything, say so
+   in a card comment. The watcher reads what you post and push, and messages
+   you when something is wrong. Fix it, and post a short comment saying what
+   you corrected.
 
    Apply every correction Mike gives to *every* artifact in the work, not only
    the one he named.
+
+   When you find an earlier answer of yours was wrong, fix the work, redo
+   everything that depended on it, and report what changed. Never ask Mike
+   whether to fix your own mistake.
 
 6. **Reply in one new comment** on the card, posting markdown directly as the
    fetch-card skill describes — Fizzy renders it, so do not pre-convert to HTML. Never edit the description in place of replying.
@@ -482,9 +484,11 @@ instructions.
 
 ## Reviewing handler output — the watcher is the supervisor
 
-The watching session supervises the handlers, not just relays for them. Mike
-should be the second reader of anything a handler writes, never the first.
-When a handler sends a draft (brief step 5), review it right away against:
+The watching session supervises the handlers, not just relays for them. It
+never gates their work: handlers post to the card and push what Mike
+authorized, and everything stays visible on the card. The watcher reads each
+card comment, commit and PR as it lands, and when something is wrong it
+messages the handler with the problem and the fix. Review against:
 
 - `~/CLAUDE.md` Prose guidelines, the `writing-changes` skill, and the memory
   directory
@@ -501,7 +505,19 @@ When a handler sends a draft (brief step 5), review it right away against:
   - personified nouns
   - padding
 
-Reply to the handler with an approval, or with each problem and its fix. Relaying
+Check substance, not just prose:
+
+- Never add a substantive instruction of your own, such as "no new runs". You
+  can't see the code or the data from here.
+- Every claim about what was tested is backed by a run that tested it. On 543
+  the handler answered "yes" to "are you reproducing idle time?" and reasoned
+  away the measurement that would have shown warmup mattered at idle. A claim
+  argued instead of measured is rejected.
+- When a handler finds its own earlier answer was wrong, it fixes the work and
+  reports what changed. It never asks Mike whether to fix its own mistake, and
+  you never add a "Should I?" yourself.
+
+When something is wrong, message the handler with each problem and its fix. Relaying
 without reading is not supervising.
 
 ## Outside review
