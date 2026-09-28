@@ -256,13 +256,19 @@ Fizzy columns are the card's state machine.
 | Researching | More information is needed before work can start. |
 | In Progress | Actively being worked on. |
 | Paused | Work has stopped, usually because it is blocked or became less urgent. |
-| In Review | Output has been generated and is waiting on external review and feedback. |
+| In Review | Our output is waiting on a third party's review: a maintainer, a teammate, a reporter. It is never used when the wait is on Mike or the bot. |
 | Pending Release | Complete and approved, but not releasable yet. Usually an embargoed security fix. Rare. |
 | Done | Everything is done. |
 | Not Now | Decided against — we are not going to do this. |
 
 A new card starts in "Maybe?". Do not move a card out of "Maybe?" on your own initiative —
 that is the prioritization decision the column exists to hold. Wait for Mike.
+
+"In Progress" or "In Review" depends on who is holding the work up:
+
+- The bot is waiting on Mike (approval, a decision, his review of our work): **In Progress**.
+- Mike and the bot are reviewing someone else's PR: **In Progress**. The review is the task.
+- Our work is waiting on someone else's review: **In Review**.
 
 An instruction from Mike to research something ("please research this", "look into
 why…", "figure out how…") is also an instruction to move the card to "Researching". Move
