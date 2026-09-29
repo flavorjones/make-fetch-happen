@@ -27,7 +27,6 @@ triggers:
   - mark it done
   # Chronicling progress
   - chronicle
-  - journal
 ---
 
 # fetch-card
@@ -237,8 +236,8 @@ markdown outside the fence.
 
 ## Chronicling
 
-"Chronicle" or "journal" means: add a comment to the card. Nothing else. It never
-means editing the description.
+"Chronicle" means: add a comment to the card. Nothing else. It never means editing
+the description.
 
 A chronicle comment summarizes the state of the work so it can be picked up later in
 a different session: what was decided and why, what was built, what's parked, and
