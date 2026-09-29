@@ -185,7 +185,7 @@ module FetchWatch
       server.mount(path, @pipeline)
     end
 
-    def catch_up(acknowledge: false, since: nil, polled: false)
+    def catch_up(acknowledge: true, since: nil, polled: false)
       fetch = ->(page) { fizzy("activity", "list", "--board", @board_id, "--page", page.to_s) }
       Catchup.new(fetch: fetch, pipeline: @pipeline, mark: @mark, acknowledge: acknowledge, since: since,
         polled: polled).run { |line| FetchWatch.emit(line) }
@@ -272,9 +272,15 @@ module FetchWatch
 
       # A 👀 on the mentioning comment, posted the moment the delivery clears the
       # filters. It says "seen" seconds after Mike hits send, long before a
-      # handler has read the card.
+      # handler has read the card. Replayed mentions get one too, so a comment
+      # that lands while the script restarts is not left without a receipt; a
+      # comment that already has our 👀 is skipped.
       def acknowledge(event)
-        fizzy("reaction", "create", "--card", event.card_number.to_s, "--comment", event.comment_id, "--content", "👀")
+        card, comment = event.card_number.to_s, event.comment_id
+        reactions = fizzy("reaction", "list", "--card", card, "--comment", comment)
+        return if reactions.any? { it["content"] == "👀" && it.dig("reacter", "id") == @identity.id }
+
+        fizzy("reaction", "create", "--card", card, "--comment", comment, "--content", "👀")
       end
 
       def report_failure(what)

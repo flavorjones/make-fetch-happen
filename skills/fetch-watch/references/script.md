@@ -62,7 +62,9 @@ Diagnostics (dropped deliveries, registration notices) go to stderr.
 
 **Acknowledgement.** The moment a live delivery clears the filters, the script
 reacts 👀 on the mentioning comment as the bot, so Mike gets a receipt within
-seconds. Replayed events (below) get no 👀, since they can be hours old.
+seconds. Replayed and polled mentions get the 👀 too, so a comment that lands
+during a restart still gets its receipt; a comment that already has the bot's 👀
+is skipped.
 
 **Replay.** Anything that happened while nothing was listening is replayed
 before that board's `READY`: the script reads the board's activity feed back to
@@ -75,8 +77,7 @@ and replays nothing; for that case only, unread mentions are in the tray:
 **Poll.** Every 60s (`--poll SECONDS`; `0` disables) the script re-reads the
 activity feed and emits anything the webhook missed, deduped, so an event
 arrives exactly once. This exists because Tailscale's public DNS for `ts.net`
-fails intermittently and a failed delivery is never retried. Polled mentions
-get the 👀 too.
+fails intermittently and a failed delivery is never retried.
 
 ## What the script enforces
 

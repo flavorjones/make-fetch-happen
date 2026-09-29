@@ -140,7 +140,7 @@ class FetchWatchCatchupTest < ActiveSupport::TestCase
     ], lines
   end
 
-  test "the startup catch-up does not acknowledge what it replays" do
+  test "a catch-up without acknowledge does not acknowledge what it replays" do
     @mark.record(FetchWatch::Event.new(move("e1", "10:01", "Next")))
     acknowledged = []
     pipeline = FetchWatch::Pipeline.new(identity: HARRY, secret: "s3cret", mark: @mark, log: StringIO.new,
