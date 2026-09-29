@@ -1,7 +1,7 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# Stream Fizzy board events to stdout for the fetch-monitor skill.
+# Stream Fizzy board events to stdout for the fetch-watch skill.
 #
 # For each board in the watch list, opens a path on this machine's Tailscale
 # Funnel, registers a Fizzy webhook on the board pointing at it, and prints one
