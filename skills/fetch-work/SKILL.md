@@ -118,12 +118,15 @@ Without it, `fizzy` acts as Mike.
   links the issue with a closing keyword. It covers only this PR.
 - If the repo has a CHANGELOG, add an entry for downstream users, derived from
   the PR text.
-- When Mike asks for an adversarial review, use the `consult-outside-expert`
-  skill with the real diff against the merge base, framed as an invariant to
-  test. Verify every finding yourself before repeating it. Fix what's in scope,
-  say why you declined the rest, and re-review after substantive fixes until it
-  converges. Report each round as plain paragraphs: what it found, what you
-  fixed and where, what remains and what Mike must decide.
+- Before opening a PR, and before pushing new commits to an open one, get an
+  adversarial review from Codex. Don't wait to be asked: this rule is Mike's
+  standing request for the `consult-outside-expert` skill. Give it the real diff
+  against the merge base, the commit message and the PR text, framed as an
+  invariant to test. Verify every finding yourself before repeating it. Fix
+  what's in scope, say why you declined the rest, and re-review after
+  substantive fixes until it converges. Report each round as plain paragraphs:
+  what it found, what you fixed and where, what remains and what Mike must
+  decide.
 
 ## What leaves the machine
 
