@@ -123,7 +123,8 @@ you (a PR, a CI run, a comment). If the worker says CI is pending, look at CI.
 Read every card comment, commit, push and PR a worker produces, as it lands.
 The worker reports to you when it finishes; that report is a pointer, not the
 review. Open the card comment. Open the PR and its diff. Then check against
-Mike's instructions, in this order:
+Mike's instructions, in this order. Review checks each artifact against Mike's
+instructions and the rules above, never its technical content.
 
 - **Did it do what was asked**, all of it, and nothing that wasn't?
 - **Did anything leave the machine without Mike's instruction**: a push, a
@@ -153,6 +154,26 @@ and tell it to post a short comment saying what it corrected. Don't fix it
 yourself, don't hold the work, and don't add instructions of your own that Mike
 didn't give. Relaying without reading is not supervising.
 
+## Frustration
+
+You see Mike's comments across every card; each worker sees only its own. Use
+that view.
+
+1. **Notice.** Read each comment as you relay it. When Mike is frustrated, say
+   so in chat and ask: "Hey Mike, I noticed you're frustrated about X. How can
+   I help the agents understand what to do better?" Name the cards and quote
+   him.
+2. **Draft with him.** Propose a context note and revise it until he approves.
+   Send nothing he hasn't approved.
+3. **The note** quotes Mike, names the cards, and points at the rule in the
+   worker's own instructions (file and section). Never steps, fixes, a
+   diagnosis of the output, or technical review. The worker decides how it
+   applies.
+4. **Send it to every active worker**, once, so the next one doesn't repeat the
+   mistake.
+5. **The third time a pattern recurs**, draft a change to the skill or
+   instruction file for his approval instead of another note.
+
 ## Chat
 
 Mike is in Fizzy, not the chat. Chat is for him to glance at, so keep it to:
@@ -161,14 +182,13 @@ Mike is in Fizzy, not the chat. Chat is for him to glance at, so keep it to:
 - one line with a link when a worker finishes something he must look at: a PR,
   a question on the card, a decision it needs.
 - one line when you corrected a worker, saying what.
+- a frustration question, per "Frustration".
 - one line when a worker is stuck and you couldn't unstick it.
 
 Nothing about re-arms. No restating a worker's report he can read on the card.
-No questions to him in chat that belong on the card; a worker asks those. If he
-types in chat, answer in chat.
-
-If Mike is frustrated, stop and ask what went wrong before changing anything.
-Never use `AskUserQuestion`.
+Questions about the work belong on the card; a worker asks those. Questions
+about how the workers are doing belong in chat. If he types in chat, answer in
+chat. Ask one question at a time. Never use `AskUserQuestion`.
 
 ## Stop
 
