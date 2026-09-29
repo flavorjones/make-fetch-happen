@@ -294,7 +294,7 @@ Run these whenever a card enters the state, whether you initiated the move or Mi
 for it in a comment.
 
 **In Progress** — if the frontmatter has no "worktree", create one following the git
-worktree rules in `~/CLAUDE.md` and add the "worktree" row.
+worktree rules in `~/CLAUDE.md` and add the "worktree" row. See "Branch names".
 
 **Researching** — same worktree action as "In Progress". Also, there must be a comment
 saying what needs to be researched. If there isn't one, move the card and post a comment
@@ -318,6 +318,23 @@ state,reviewDecision`). If any isn't, leave the card where it is and say so. Oth
 up.
 
 **Not Now** — clean up. There is nothing to confirm; the decision is not to do the work.
+
+### Branch names
+
+A card's branch is `card-<number>-<slug>`. The number is the card number. The slug is at
+most four lowercase hyphenated words naming the card's subject, taken from the title's
+description part. It names the problem, never the state or the fix, so it stays true when
+research turns into a fix:
+
+    card-441-css-url-escaped-parens
+    card-564-allowed-uri-ncr-control-char
+
+The directory is `<repo>--<branch>`, per `~/CLAUDE.md`.
+
+Never rename a branch or a worktree directory. The name is a handle, not documentation;
+the PR title carries the meaning. A second branch for the same card — a prototype, a split
+PR — keeps the stem and adds a suffix (`card-564-allowed-uri-ncr-control-char-alt`) so
+cleanup finds it.
 
 ### Cleaning up
 

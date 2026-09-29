@@ -57,9 +57,10 @@ Without it, `fizzy` acts as Mike.
    Any instruction to research or change code needs a worktree. Use the
    "worktree" row if the path exists; otherwise create one per the git worktree
    rules in `~/CLAUDE.md` (local branch created with `--no-track`, directory
-   `<repo>--<branch>` beside the repo) and add the row. That is fetch-card's
-   entry action for In Progress and Researching. A question or status request
-   needs no repository.
+   `<repo>--<branch>` beside the repo) and add the row. The branch is named
+   `card-<number>-<slug>` per fetch-card's "Branch names", and is never renamed.
+   That is fetch-card's entry action for In Progress and Researching. A question
+   or status request needs no repository.
 
    Work only in that worktree. The `.git` is shared with every other worktree
    and with Mike's own checkout, so: never `git stash`; touch no branch, tag or
