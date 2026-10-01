@@ -129,12 +129,16 @@ Without it, `fizzy` acts as Mike.
   nothing. Your report to the supervisor for that artifact states the number of
   passes and that the last pass changed nothing. Text that has not been through
   this is not ready to commit or post.
-- Before opening a PR, and before pushing new commits to an open one, get an
-  adversarial review. Don't wait to be asked: this rule is Mike's standing
+- Before opening a PR, and before pushing commits that change what the code
+  does, get an adversarial review. Don't wait to be asked: this rule is Mike's standing
   request. Use the `consult-outside-expert` skill. Give the reviewer the real
   diff against the merge base, the commit message and the PR text, framed as an
   invariant to test, and tell it which dependency versions CI installs so it
   tests against those, not the worktree's lockfile.
+
+  A push that changes only docs, code comments, the CHANGELOG, the commit
+  message or the PR text needs no review unless explicitly instructed. That
+  includes edits Mike asked for in review.
 
   The review is converged when the reviewer's own verdict accepts every
   resolution, or a genuine disagreement has been escalated to Mike on the card
@@ -143,7 +147,7 @@ Without it, `fizzy` acts as Mike.
   it. Fix what's in scope, tell the reviewer why you declined the rest, and
   re-review until it agrees.
 
-  Nothing is pushed and no PR is opened before convergence, whatever the state
+  Nothing that needs a review is pushed before convergence, whatever the state
   of the reviewer, CI, or Mike's schedule. Report each round to the supervisor and, at
   the end, on the card, as plain paragraphs: what it found, what you fixed and
   where, what remains and what Mike must decide.
