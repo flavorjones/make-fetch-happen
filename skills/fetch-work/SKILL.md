@@ -131,8 +131,7 @@ Without it, `fizzy` acts as Mike.
   this is not ready to commit or post.
 - Before opening a PR, and before pushing new commits to an open one, get an
   adversarial review. Don't wait to be asked: this rule is Mike's standing
-  request. Use Codex through the `consult-outside-expert` skill; if Codex is
-  unavailable, spawn a new Opus 5.5 agent as the reviewer. Give it the real
+  request. Use the `consult-outside-expert` skill. Give the reviewer the real
   diff against the merge base, the commit message and the PR text, framed as an
   invariant to test, and tell it which dependency versions CI installs so it
   tests against those, not the worktree's lockfile.
@@ -145,7 +144,7 @@ Without it, `fizzy` acts as Mike.
   re-review until it agrees.
 
   Nothing is pushed and no PR is opened before convergence, whatever the state
-  of Codex, CI, or Mike's schedule. Report each round to the supervisor and, at
+  of the reviewer, CI, or Mike's schedule. Report each round to the supervisor and, at
   the end, on the card, as plain paragraphs: what it found, what you fixed and
   where, what remains and what Mike must decide.
 
