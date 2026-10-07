@@ -4,10 +4,10 @@
 # Turn GitHub security-advisory notifications into golden Fizzy cards.
 #
 # Finds unread notifications that are repository security advisories. A report
-# without an existing card becomes a new golden, tagged card; activity on a
-# report that already has a card adds a comment to that card instead of
-# creating a duplicate. Either way the notification is marked done so it isn't
-# processed again.
+# without an existing card becomes a new golden, tagged card that links the
+# advisory; activity on a report that already has a card adds a comment saying
+# why GitHub notified instead of creating a duplicate. Either way the
+# notification is marked done so it isn't processed again.
 #
 # Fizzy calls go through the `fizzy` CLI under a named profile, which decides
 # the account and the credentials. Override with --profile and --board.
@@ -15,6 +15,7 @@
 require "json"
 require "open3"
 require "optparse"
+require_relative "../lib/fetch_gh_security"
 
 options = {
   profile: "fetchbot_personal",
@@ -47,6 +48,14 @@ def fizzy(*args)
 end
 
 cards = fizzy("card", "list", "--board", BOARD, "--all")
+# A repo whose advisories can't be listed yields no match, and the card falls
+# back to linking the security page.
+advisories = Hash.new do |cache, repo|
+  cache[repo] = gh_api("--paginate", "--slurp", "/repos/#{repo}/security-advisories?per_page=100").flatten
+rescue => e
+  warn "could not list advisories for #{repo}: #{e.message}"
+  cache[repo] = []
+end
 
 count = 0
 before = nil
@@ -68,11 +77,11 @@ loop do
   break if before && oldest >= before
   before = oldest
 
-  advisories = batch.select do |n|
+  advisory_notifications = batch.select do |n|
     n.dig("subject", "type") == "RepositoryAdvisory"
   end
 
-  advisories.each do |n|
+  advisory_notifications.each do |n|
     repo      = n.dig("repository", "full_name")
     title     = n.dig("subject", "title")
     thread_id = n["id"]
@@ -82,11 +91,11 @@ loop do
     existing = cards.find { |c| c["title"] == card_title }
 
     if existing
-      fizzy("comment", "create", "--card", existing["number"].to_s, "--body", "Someone commented on the report.")
+      fizzy("comment", "create", "--card", existing["number"].to_s, "--body", FetchGhSecurity.activity_comment(n["reason"]))
       puts "commented ##{existing["number"]}: #{card_title}"
     else
-      rel         = "https://github.com/#{repo}/security/advisories"
-      description = "<table><tr><td>rel</td><td>#{rel}</td></tr></table>"
+      advisory    = FetchGhSecurity.advisory_for(n, advisories[repo])
+      description = FetchGhSecurity.frontmatter(repo, advisory)
 
       card = fizzy("card", "create", "--board", BOARD, "--title", card_title, "--description", description)
       number = card["number"].to_s
