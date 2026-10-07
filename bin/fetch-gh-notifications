@@ -1,0 +1,95 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Turn GitHub notifications that ask for Mike's attention into Fizzy cards.
+#
+# Walks the unread notifications newest first and cards each one whose reason
+# is a mention, a review request, or an assignment. A notification whose
+# artifact already has a card (by its "ref" frontmatter, on any lane of the
+# board) is skipped. Either way the notification is marked read so it isn't
+# processed again.
+#
+# Security advisories are left to fetch-gh-security. Fizzy calls go through the
+# `fizzy` CLI under a named profile, which decides the account and the
+# credentials. Override with --profile and --board.
+
+require "json"
+require "open3"
+require "optparse"
+require_relative "../lib/fetch_gh_notifications"
+
+options = {
+  profile: "fetchbot_personal",
+  board:   "https://app.fizzy.do/6097036/boards/03f3qct6t4hsg76apuu1jea6w",
+  dry_run: false
+}
+OptionParser.new do |opts|
+  opts.banner = "usage: #{$PROGRAM_NAME} [--profile NAME] [--board URL_OR_ID] [--dry-run]"
+  opts.on("--profile NAME", "fizzy CLI profile (default: #{options[:profile]})") { |v| options[:profile] = v }
+  opts.on("--board URL_OR_ID", "board URL or ID (default: #{options[:board]})") { |v| options[:board] = v }
+  opts.on("--dry-run", "print the cards that would be created, create nothing") { options[:dry_run] = true }
+end.parse!
+
+PROFILE = options[:profile]
+BOARD   = options[:board].split("/").last
+DRY_RUN = options[:dry_run]
+
+def gh_api(*args)
+  command = [ "gh", "api", *args ]
+  response, status = Open3.capture2e(*command)
+  raise "gh api failed: #{response}" unless status.success?
+  response.strip.empty? ? nil : JSON.parse(response)
+end
+
+def fizzy(*args)
+  command = [ "fizzy", *args, "--quiet", "--profile", PROFILE ]
+  stdout, stderr, status = Open3.capture3(*command)
+  raise "`#{command.join(" ")}` failed: #{stderr.strip}" unless status.success?
+  parsed = JSON.parse(stdout)
+  parsed.is_a?(Hash) ? parsed.fetch("data", parsed) : parsed
+end
+
+# The default listing omits closed and not-now cards.
+cards = %w[all closed not_now].flat_map do |lane|
+  fizzy("card", "list", "--board", BOARD, "--all", "--indexed-by", lane)
+end
+carded_refs = cards.flat_map { |c| FetchGhNotifications.frontmatter_refs(c["description_html"]) }.to_set
+
+notifications = gh_api("--paginate", "--slurp", "/notifications?per_page=50").flatten
+wanted = notifications
+  .select { |n| FetchGhNotifications::REASON_TAGS.key?(n["reason"]) && n.dig("subject", "type") != "RepositoryAdvisory" }
+  .sort_by { |n| n["updated_at"] }
+  .reverse
+
+count = 0
+
+wanted.each do |n|
+  repo   = n["repository"]
+  ref    = FetchGhNotifications.web_url(n.dig("subject", "url"))
+  reason = n["reason"]
+
+  card_title = "#{repo["name"]}: #{n.dig("subject", "title")}"
+
+  if carded_refs.include?(ref)
+    puts "skipped (carded): #{ref}"
+  else
+    tags        = FetchGhNotifications.tags(n)
+    description = FetchGhNotifications.description(ref, reason)
+
+    if DRY_RUN
+      puts "would card [#{tags.join(",")}] #{card_title} (#{ref})"
+    else
+      card = fizzy("card", "create", "--board", BOARD, "--title", card_title, "--description", description)
+      number = card["number"].to_s
+      tags.each { |tag| fizzy("card", "tag", number, "--tag", tag) }
+      puts "carded ##{number}: #{card_title}"
+    end
+
+    carded_refs << ref
+    count += 1
+  end
+
+  gh_api("-X", "PATCH", "/notifications/threads/#{n["id"]}") unless DRY_RUN
+end
+
+puts "done (#{count} #{DRY_RUN ? "would be carded" : "carded"})"
