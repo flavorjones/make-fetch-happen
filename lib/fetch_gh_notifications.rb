@@ -10,6 +10,14 @@ module FetchGhNotifications
     "assign"           => "assigned"
   }.freeze
 
+  # A thread keeps the reason it was first notified for, so later activity on a
+  # thread that mentioned Mike still arrives as a "mention".
+  ACTIVITY_COMMENTS = {
+    "mention"          => "New GitHub activity on a thread that mentions you",
+    "review_requested" => "New GitHub activity on a pull request that requests your review",
+    "assign"           => "New GitHub activity on a thread assigned to you"
+  }.freeze
+
   module_function
 
   # The API URL of a pull request uses "pulls" and of a commit "commits"; the
@@ -48,5 +56,10 @@ module FetchGhNotifications
       </tbody></table></figure>
       <p>GitHub notification reason: #{reason}</p>
     HTML
+  end
+
+  def activity_comment(reason, comment_url)
+    sentence = ACTIVITY_COMMENTS.fetch(reason)
+    comment_url ? "#{sentence}: [latest comment](#{comment_url})." : "#{sentence}."
   end
 end

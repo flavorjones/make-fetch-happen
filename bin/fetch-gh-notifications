@@ -6,8 +6,10 @@
 # Walks the unread notifications newest first and cards each one whose reason
 # is a mention, a review request, or an assignment. A notification whose
 # artifact already has a card (by its "ref" frontmatter, on any lane of the
-# board) is skipped. Either way the notification is marked read so it isn't
-# processed again.
+# board) adds a comment to that card instead, linking the latest GitHub comment
+# when there is one, and moves a Done card tagged "review" back to Next while
+# its pull request is open. Either way the notification is marked read so it
+# isn't processed again.
 #
 # Security advisories are left to fetch-gh-security. Fizzy calls go through the
 # `fizzy` CLI under a named profile, which decides the account and the
@@ -30,6 +32,8 @@ OptionParser.new do |opts|
   opts.on("--dry-run", "print the cards that would be created, create nothing") { options[:dry_run] = true }
 end.parse!
 
+$stdout.sync = true
+
 PROFILE = options[:profile]
 BOARD   = options[:board].split("/").last
 DRY_RUN = options[:dry_run]
@@ -50,16 +54,48 @@ def fizzy(*args)
 end
 
 # The default listing omits closed and not-now cards.
-cards = %w[all closed not_now].flat_map do |lane|
-  fizzy("card", "list", "--board", BOARD, "--all", "--indexed-by", lane)
-end
-carded_refs = cards.flat_map { |c| FetchGhNotifications.frontmatter_refs(c["description_html"]) }.to_set
+LANES = { "all" => "open", "closed" => "closed", "not_now" => "not-now" }.freeze
 
+cards_by_ref = {}
+LANES.each do |lane, name|
+  print "reading #{name} cards... "
+  cards = fizzy("card", "list", "--board", BOARD, "--all", "--indexed-by", lane)
+  puts cards.size
+  cards.each do |card|
+    FetchGhNotifications.frontmatter_refs(card["description_html"]).each { |ref| cards_by_ref[ref] ||= card }
+  end
+end
+
+print "reading notifications... "
 notifications = gh_api("--paginate", "--slurp", "/notifications?per_page=50").flatten
+puts notifications.size
+
 wanted = notifications
   .select { |n| FetchGhNotifications::REASON_TAGS.key?(n["reason"]) && n.dig("subject", "type") != "RepositoryAdvisory" }
   .sort_by { |n| n["updated_at"] }
   .reverse
+
+# `latest_comment_url` is null, or the subject itself, when the latest
+# activity wasn't a comment.
+def latest_comment_html_url(notification)
+  url = notification.dig("subject", "latest_comment_url")
+  return if url.nil? || url == notification.dig("subject", "url")
+
+  gh_api(url)["html_url"]
+rescue => e
+  warn "could not read #{url}: #{e.message}"
+end
+
+def open?(notification)
+  gh_api(notification.dig("subject", "url"))["state"] == "open"
+rescue => e
+  warn "could not read #{notification.dig("subject", "url")}: #{e.message}"
+  false
+end
+
+def next_column_id
+  @next_column_id ||= fizzy("column", "list", "--board", BOARD).find { |c| c["name"] == "Next" }.fetch("id")
+end
 
 count = 0
 
@@ -70,14 +106,32 @@ wanted.each do |n|
 
   card_title = "#{repo["name"]}: #{n.dig("subject", "title")}"
 
-  if carded_refs.include?(ref)
-    puts "skipped (carded): #{ref}"
+  if (existing = cards_by_ref[ref])
+    number  = existing["number"].to_s
+    comment = FetchGhNotifications.activity_comment(reason, latest_comment_html_url(n))
+    # A review card in Done comes back for the next round of review, unless
+    # the pull request has been merged or closed.
+    reactivate = existing["closed"] && existing["tags"].to_a.include?("review") && open?(n)
+
+    if DRY_RUN
+      puts "would comment ##{number}: #{comment}"
+      puts "would move ##{number} to Next" if reactivate
+    else
+      fizzy("comment", "create", "--card", number, "--body", comment)
+      puts "commented ##{number}: #{comment}"
+      if reactivate
+        fizzy("card", "column", number, "--column", next_column_id)
+        existing["closed"] = false
+        puts "moved ##{number} to Next"
+      end
+    end
   else
     tags        = FetchGhNotifications.tags(n)
     description = FetchGhNotifications.description(ref, reason)
 
     if DRY_RUN
       puts "would card [#{tags.join(",")}] #{card_title} (#{ref})"
+      number = "new"
     else
       card = fizzy("card", "create", "--board", BOARD, "--title", card_title, "--description", description)
       number = card["number"].to_s
@@ -85,7 +139,7 @@ wanted.each do |n|
       puts "carded ##{number}: #{card_title}"
     end
 
-    carded_refs << ref
+    cards_by_ref[ref] = { "number" => number, "tags" => tags, "closed" => false }
     count += 1
   end
 

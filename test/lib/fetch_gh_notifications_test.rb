@@ -46,6 +46,14 @@ class FetchGhNotificationsTest < ActiveSupport::TestCase
     assert_includes description, "GitHub notification reason: mention"
   end
 
+  test "the activity comment says why GitHub notified and links the latest comment" do
+    assert_equal "New GitHub activity on a thread that mentions you.", FetchGhNotifications.activity_comment("mention", nil)
+    assert_equal "New GitHub activity on a pull request that requests your review.", FetchGhNotifications.activity_comment("review_requested", nil)
+    assert_equal "New GitHub activity on a thread assigned to you.", FetchGhNotifications.activity_comment("assign", nil)
+    assert_equal "New GitHub activity on a thread that mentions you: [latest comment](https://github.com/a/b/pull/1#issuecomment-9).",
+      FetchGhNotifications.activity_comment("mention", "https://github.com/a/b/pull/1#issuecomment-9")
+  end
+
   private
     def notification(reason, owner, private:)
       { "reason" => reason, "repository" => { "owner" => { "login" => owner }, "private" => private } }
