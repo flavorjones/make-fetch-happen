@@ -58,7 +58,8 @@ Without it, `fizzy` acts as Mike.
    without a prefix is unidentified: don't guess. If no checkout is found, ask on
    the card and stop; when Mike answers, add a "repo" row.
 
-   Any instruction to research or change code needs a worktree. Use the
+   If Mike names a directory or says not to use a worktree, work where he
+   says. Otherwise, research and code changes go in a worktree. Use the
    "worktree" row if the path exists; otherwise create one per the git worktree
    rules in `~/CLAUDE.md` (local branch created with `--no-track`, directory
    `<repo>--<branch>` beside the repo) and add the row. The branch is named
@@ -66,9 +67,10 @@ Without it, `fizzy` acts as Mike.
    That is fetch-card's entry action for In Progress and Researching. A question
    or status request needs no repository.
 
-   Work only in that worktree. The `.git` is shared with every other worktree
-   and with Mike's own checkout, so: never `git stash`; touch no branch, tag or
-   worktree but your own; leave the base checkout's `HEAD` and index alone. To
+   The `.git` is shared with every other worktree and with Mike's own
+   checkout, so: never `git stash`; touch no branch, tag or worktree but your
+   own; unless Mike sent you there, leave the base checkout's `HEAD` and index
+   alone. To
    toggle a file, edit it in place and restore with `git checkout -- <path>`,
    and only for a file with none of your uncommitted work in it.
 
