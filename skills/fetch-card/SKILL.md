@@ -292,7 +292,8 @@ fizzy card column NUMBER --column "$COLUMN"
 Run these whenever a card enters the state, whether you initiated the move or Mike asked
 for it in a comment.
 
-**In Progress** — if the frontmatter has no "worktree", create one following the git
+**In Progress** — if Mike names a directory or says not to use a worktree, work where he
+says. Otherwise, if the frontmatter has no "worktree", create one following the git
 worktree rules in `~/CLAUDE.md` and add the "worktree" row. See "Branch names".
 
 **Researching** — same worktree action as "In Progress". Also, there must be a comment
