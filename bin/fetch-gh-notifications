@@ -1,19 +1,19 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# Turn GitHub notifications that ask for Mike's attention into Fizzy cards.
+# Turn GitHub notifications that need Mike's attention into Fizzy cards.
 #
-# Walks the unread notifications newest first and cards each one whose reason
-# is a mention, a review request, or an assignment. A notification whose
-# artifact already has a card (by its "ref" frontmatter, on any lane of the
-# board) adds a comment to that card instead, linking the latest GitHub comment
-# when there is one, and moves a Done card tagged "review" back to Next while
-# its pull request is open. Either way the notification is marked read so it
-# isn't processed again.
+# Walks the unread notifications newest first and cards each mention, review
+# request, assignment and repository security advisory; lib/fetch_gh_notifications
+# decides what each kind of card looks like. A notification whose artifact
+# already has a card (by its "ref" frontmatter, on any lane of the board) adds a
+# comment to that card instead, linking the latest GitHub comment when there is
+# one, and moves a Done card tagged "review" back to Next while its pull request
+# is open. Either way the notification is marked read, or done for an advisory,
+# so it isn't processed again.
 #
-# Security advisories are left to fetch-gh-security. Fizzy calls go through the
-# `fizzy` CLI under a named profile, which decides the account and the
-# credentials. Override with --profile and --board.
+# Fizzy calls go through the `fizzy` CLI under a named profile, which decides
+# the account and the credentials. Override with --profile and --board.
 
 require "json"
 require "open3"
@@ -55,25 +55,28 @@ end
 
 # The default listing omits closed and not-now cards.
 LANES = { "all" => "open", "closed" => "closed", "not_now" => "not-now" }.freeze
+MARKS = { "read" => "PATCH", "done" => "DELETE" }.freeze
 
-cards_by_ref = {}
-LANES.each do |lane, name|
+cards = LANES.flat_map do |lane, name|
   print "reading #{name} cards... "
-  cards = fizzy("card", "list", "--board", BOARD, "--all", "--indexed-by", lane)
-  puts cards.size
-  cards.each do |card|
-    FetchGhNotifications.frontmatter_refs(card["description_html"]).each { |ref| cards_by_ref[ref] ||= card }
-  end
+  fizzy("card", "list", "--board", BOARD, "--all", "--indexed-by", lane).tap { puts it.size }
 end
+board = FetchGhNotifications::Board.new(cards)
 
 print "reading notifications... "
 notifications = gh_api("--paginate", "--slurp", "/notifications?per_page=50").flatten
 puts notifications.size
 
-wanted = notifications
-  .select { |n| FetchGhNotifications::REASON_TAGS.key?(n["reason"]) && n.dig("subject", "type") != "RepositoryAdvisory" }
-  .sort_by { |n| n["updated_at"] }
-  .reverse
+# A repo whose advisories can't be listed yields no match, and the card falls
+# back to linking the security page.
+advisories = Hash.new do |cache, repo|
+  cache[repo] = gh_api("--paginate", "--slurp", "/repos/#{repo}/security-advisories?per_page=100").flatten
+rescue => e
+  warn "could not list advisories for #{repo}: #{e.message}"
+  cache[repo] = []
+end
+
+wanted = notifications.sort_by { |n| n["updated_at"] }.reverse
 
 # `latest_comment_url` is null, or the subject itself, when the latest
 # activity wasn't a comment.
@@ -100,15 +103,11 @@ end
 count = 0
 
 wanted.each do |n|
-  repo   = n["repository"]
-  ref    = FetchGhNotifications.web_url(n.dig("subject", "url"))
-  reason = n["reason"]
+  item = FetchGhNotifications.route(n, advisories) or next
 
-  card_title = "#{repo["name"]}: #{n.dig("subject", "title")}"
-
-  if (existing = cards_by_ref[ref])
+  if (existing = board.find(item))
     number  = existing["number"].to_s
-    comment = FetchGhNotifications.activity_comment(reason, latest_comment_html_url(n))
+    comment = item.activity_comment(latest_comment_html_url(n))
     # A review card in Done comes back for the next round of review, unless
     # the pull request has been merged or closed.
     reactivate = existing["closed"] && existing["tags"].to_a.include?("review") && open?(n)
@@ -126,24 +125,22 @@ wanted.each do |n|
       end
     end
   else
-    tags        = FetchGhNotifications.tags(n)
-    description = FetchGhNotifications.description(ref, reason)
-
     if DRY_RUN
-      puts "would card [#{tags.join(",")}] #{card_title} (#{ref})"
+      puts "would card [#{item.tags.join(",")}]#{" golden" if item.golden?} #{item.title} (#{item.ref})"
       number = "new"
     else
-      card = fizzy("card", "create", "--board", BOARD, "--title", card_title, "--description", description)
+      card = fizzy("card", "create", "--board", BOARD, "--title", item.title, "--description", item.description)
       number = card["number"].to_s
-      tags.each { |tag| fizzy("card", "tag", number, "--tag", tag) }
-      puts "carded ##{number}: #{card_title}"
+      item.tags.each { |tag| fizzy("card", "tag", number, "--tag", tag) }
+      fizzy("card", "golden", number) if item.golden?
+      puts "carded ##{number}: #{item.title}"
     end
 
-    cards_by_ref[ref] = { "number" => number, "tags" => tags, "closed" => false }
+    board.add(item, { "number" => number, "tags" => item.tags, "closed" => false })
     count += 1
   end
 
-  gh_api("-X", "PATCH", "/notifications/threads/#{n["id"]}") unless DRY_RUN
+  gh_api("-X", MARKS.fetch(item.mark), "/notifications/threads/#{n["id"]}") unless DRY_RUN
 end
 
 puts "done (#{count} #{DRY_RUN ? "would be carded" : "carded"})"

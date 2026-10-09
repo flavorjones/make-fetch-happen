@@ -10,6 +10,7 @@ class FetchGhNotificationsScriptTest < ActiveSupport::TestCase
     @lanes = Hash.new { |lanes, lane| lanes[lane] = [] }
     @comments = {}
     @states = {}
+    @advisories = {}
   end
 
   teardown do
@@ -140,14 +141,69 @@ class FetchGhNotificationsScriptTest < ActiveSupport::TestCase
     assert_equal %w[/notifications/threads/42 /notifications/threads/41], marked_read
   end
 
-  test "other reasons and security advisories are left alone" do
+  test "other reasons are left alone" do
     run_script \
       notification("41", "subscribed", "rails/rails", "pulls/1", "Watching"),
-      notification("42", "team_mention", "basecamp/launchpad", "pulls/2", "Team"),
-      notification("43", "assign", "sparklemotion/nokogiri", nil, "Use-after-free", type: "RepositoryAdvisory")
+      notification("42", "team_mention", "basecamp/launchpad", "pulls/2", "Team")
 
     assert_empty fizzy_calls("card", "create")
     assert_empty marked_read
+  end
+
+  test "a security advisory becomes a golden security card that refs the advisory, and is marked done" do
+    @advisories["sparklemotion/nokogiri"] = [ advisory("sparklemotion/nokogiri", "GHSA-bbbb", "NONET bypass on JRuby") ]
+
+    run_script advisory_notification("43", "sparklemotion/nokogiri", "NONET bypass on JRuby", "subscribed")
+
+    create = fizzy_calls("card", "create").sole
+    assert_equal "nokogiri: NONET bypass on JRuby", argument(create, "--title")
+    assert_includes argument(create, "--description"), %(href="https://github.com/sparklemotion/nokogiri/security/advisories/GHSA-bbbb")
+    assert_equal %w[oss security], fizzy_calls("card", "tag").map { argument(it, "--tag") }
+    assert_equal [ %w[card golden 700] ], fizzy_calls("card", "golden").map { it.first(3) }
+    assert_equal [ "/notifications/threads/43" ], marked_done
+    assert_empty marked_read
+  end
+
+  test "a security advisory whose repo's advisories can't be listed still gets a card" do
+    run_script advisory_notification("43", "sparklemotion/nokogiri", "NONET bypass on JRuby", "subscribed")
+
+    description = argument(fizzy_calls("card", "create").sole, "--description")
+    assert_includes description, "<p>rel</p>"
+    refute_includes description, "<p>ref</p>"
+    assert_equal [ "/notifications/threads/43" ], marked_done
+  end
+
+  test "a security advisory already reffed by a done card gets a comment instead of a second card" do
+    @lanes["closed"] << card("https://github.com/sparklemotion/mechanize/security/advisories/GHSA-2mwr",
+      number: 227, title: "mechanize: cross-host redirect header leak", closed: true)
+    @advisories["sparklemotion/mechanize"] = [ advisory("sparklemotion/mechanize", "GHSA-2mwr", "Mechanize sends credential headers to another host after an HTTP redirect") ]
+
+    run_script advisory_notification("43", "sparklemotion/mechanize", "Mechanize sends credential headers to another host after an HTTP redirect", "comment")
+
+    assert_empty fizzy_calls("card", "create")
+    comment = fizzy_calls("comment", "create").sole
+    assert_equal [ "227", "Someone commented on the report." ], [ argument(comment, "--card"), argument(comment, "--body") ]
+    assert_empty fizzy_calls("card", "column")
+    assert_equal [ "/notifications/threads/43" ], marked_done
+  end
+
+  test "a security advisory card without a ref is found by its title" do
+    @lanes["all"] << { "number" => 618, "title" => "nokogiri: NONET bypass on JRuby", "tags" => %w[oss security], "closed" => false }
+
+    run_script advisory_notification("43", "sparklemotion/nokogiri", "NONET bypass on JRuby", "state_change")
+
+    assert_empty fizzy_calls("card", "create")
+    assert_equal [ [ "618", "The report's state changed." ] ], fizzy_calls("comment", "create").map { [ argument(it, "--card"), argument(it, "--body") ] }
+  end
+
+  test "advisories are listed once per repo" do
+    @advisories["sparklemotion/nokogiri"] = [ advisory("sparklemotion/nokogiri", "GHSA-bbbb", "NONET bypass on JRuby") ]
+
+    run_script \
+      advisory_notification("43", "sparklemotion/nokogiri", "NONET bypass on JRuby", "subscribed"),
+      advisory_notification("44", "sparklemotion/nokogiri", "Use-after-free", "subscribed")
+
+    assert_equal 1, calls("gh").count { it.last.include?("/security-advisories") }
   end
 
   test "a dry run creates, comments, moves and marks nothing" do
@@ -157,12 +213,15 @@ class FetchGhNotificationsScriptTest < ActiveSupport::TestCase
     run_script \
       notification("41", "mention", "rails/rails", "pulls/1", "Fix it"),
       notification("42", "review_requested", "rails/rails", "pulls/2", "Review it"),
+      advisory_notification("43", "sparklemotion/nokogiri", "NONET bypass on JRuby", "subscribed"),
       args: [ "--dry-run" ]
 
     assert_empty fizzy_calls("card", "create")
+    assert_empty fizzy_calls("card", "golden")
     assert_empty fizzy_calls("comment", "create")
     assert_empty fizzy_calls("card", "column")
     assert_empty marked_read
+    assert_empty marked_done
   end
 
   private
@@ -174,8 +233,20 @@ class FetchGhNotificationsScriptTest < ActiveSupport::TestCase
                        "latest_comment_url" => latest_comment_url } }
     end
 
-    def card(ref, number: 600, tags: [], closed: false)
-      { "number" => number, "tags" => tags, "closed" => closed, "description_html" => FetchGhNotifications.description(ref, "mention") }
+    def advisory_notification(id, repo, title, reason)
+      owner, name = repo.split("/")
+      { "id" => id, "reason" => reason, "updated_at" => "2026-10-05T14:14:39Z",
+        "repository" => { "name" => name, "full_name" => repo, "private" => false, "owner" => { "login" => owner } },
+        "subject" => { "title" => title, "type" => "RepositoryAdvisory", "url" => nil, "latest_comment_url" => nil } }
+    end
+
+    def advisory(repo, ghsa_id, summary)
+      { "ghsa_id" => ghsa_id, "summary" => summary, "updated_at" => "2026-10-05T14:14:05Z",
+        "html_url" => "https://github.com/#{repo}/security/advisories/#{ghsa_id}" }
+    end
+
+    def card(ref, number: 600, title: "rails: Some card", tags: [], closed: false)
+      { "number" => number, "title" => title, "tags" => tags, "closed" => closed, "description_html" => FetchGhNotifications.frontmatter([ [ "ref", ref ] ]) }
     end
 
     def run_script(*notifications, args: [])
@@ -183,8 +254,13 @@ class FetchGhNotificationsScriptTest < ActiveSupport::TestCase
       @lanes.each { |lane, cards| File.write(@dir.join("cards-#{lane}.json"), { data: cards }.to_json) }
       File.write(@dir.join("comments.json"), @comments.to_json)
       File.write(@dir.join("states.json"), @states.to_json)
+      @advisories.each { |repo, list| File.write(@dir.join("advisories-#{repo.tr("/", "_")}.json"), [ list ].to_json) }
       fake("gh", <<~'RUBY')
-        if ARGV.include?("PATCH") then exit
+        if ARGV.include?("PATCH") || ARGV.include?("DELETE") then exit
+        elsif (repo = ARGV.last[%r{/repos/(.+)/security-advisories}, 1])
+          path = File.join(DIR, "advisories-#{repo.tr("/", "_")}.json")
+          abort "HTTP 404" unless File.exist?(path)
+          print File.read(path)
         elsif ARGV.last.start_with?("/notifications?") then print File.read(File.join(DIR, "notifications.json"))
         elsif (html_url = JSON.parse(File.read(File.join(DIR, "comments.json")))[ARGV.last])
           print({ html_url: html_url }.to_json)
@@ -231,6 +307,10 @@ class FetchGhNotificationsScriptTest < ActiveSupport::TestCase
 
     def marked_read
       calls("gh").select { it.include?("PATCH") }.map(&:last)
+    end
+
+    def marked_done
+      calls("gh").select { it.include?("DELETE") }.map(&:last)
     end
 
     def argument(call, flag)
