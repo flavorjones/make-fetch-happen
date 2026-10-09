@@ -7,7 +7,8 @@ require "time"
 #
 # `route` picks the kind of notification. Each kind answers the same questions:
 # the card's title, ref, tags, description and golden-ness, the comment for
-# later activity, and how GitHub should mark the notification once handled.
+# later activity, whether a Done card comes back while its artifact is open,
+# and how GitHub should mark the notification once handled.
 module FetchGhNotifications
   REASON_TAGS = {
     "mention"          => "mentioned",
@@ -78,6 +79,7 @@ module FetchGhNotifications
     def ref = FetchGhNotifications.web_url(notification.dig("subject", "url"))
     def keys = [ ref ]
     def golden? = false
+    def reopens_while_open? = %w[PullRequest Issue Discussion].include?(notification.dig("subject", "type"))
     def mark = "read"
 
     def tags
@@ -117,6 +119,7 @@ module FetchGhNotifications
     def ref = advisory&.fetch("html_url")
     def tags = %w[oss security]
     def golden? = true
+    def reopens_while_open? = false
     def mark = "done"
 
     # Advisories in one repo can share a title, so the title is the key only

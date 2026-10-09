@@ -113,10 +113,35 @@ class FetchGhNotificationsScriptTest < ActiveSupport::TestCase
     assert_equal [ "/notifications/threads/41" ], marked_read
   end
 
-  test "a done card without the review tag stays done" do
-    @lanes["closed"] << card("https://github.com/rails/rails/pull/58781", number: 600, tags: %w[mentioned oss], closed: true)
+  test "a done card moves back to Next while its issue or discussion is open, whatever its tags" do
+    @lanes["closed"] << card("https://github.com/basecamp/hotcell/discussions/107", number: 649, tags: %w[oss], closed: true)
+    @lanes["closed"] << card("https://github.com/rails/rails/issues/55881", number: 650, tags: %w[mentioned oss], closed: true)
+    @states["https://api.github.com/repos/basecamp/hotcell/discussions/107"] = "open"
+    @states["https://api.github.com/repos/rails/rails/issues/55881"] = "open"
 
-    run_script notification("41", "mention", "rails/rails", "pulls/58781", "Stop setting the ACL")
+    run_script \
+      notification("41", "mention", "basecamp/hotcell", "discussions/107", "Using a Docker Cell From Rails Running on macOS", type: "Discussion"),
+      notification("42", "mention", "rails/rails", "issues/55881", "Flaky test", type: "Issue")
+
+    assert_equal %w[649 650], fizzy_calls("card", "column").map { it[2] }.sort
+  end
+
+  test "a done card for a closed issue stays done" do
+    @lanes["closed"] << card("https://github.com/rails/rails/issues/55881", number: 650, tags: %w[mentioned oss], closed: true)
+    @states["https://api.github.com/repos/rails/rails/issues/55881"] = "closed"
+
+    run_script notification("42", "mention", "rails/rails", "issues/55881", "Flaky test", type: "Issue")
+
+    assert_equal 1, fizzy_calls("comment", "create").size
+    assert_empty fizzy_calls("card", "column")
+  end
+
+  test "a done security advisory card stays done" do
+    @lanes["closed"] << card("https://github.com/sparklemotion/nokogiri/security/advisories/GHSA-bbbb",
+      number: 618, title: "nokogiri: NONET bypass on JRuby", tags: %w[oss security], closed: true)
+    @advisories["sparklemotion/nokogiri"] = [ advisory("sparklemotion/nokogiri", "GHSA-bbbb", "NONET bypass on JRuby") ]
+
+    run_script advisory_notification("43", "sparklemotion/nokogiri", "NONET bypass on JRuby", "comment")
 
     assert_equal 1, fizzy_calls("comment", "create").size
     assert_empty fizzy_calls("card", "column")

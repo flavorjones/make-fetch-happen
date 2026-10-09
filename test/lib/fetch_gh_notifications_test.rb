@@ -74,6 +74,13 @@ class FetchGhNotificationsTest < ActiveSupport::TestCase
     assert_equal "read", item.mark
   end
 
+  test "a participation reopens while open only for a pull request, issue or discussion" do
+    assert FetchGhNotifications::Participation.new(notification("mention", type: "PullRequest")).reopens_while_open?
+    assert FetchGhNotifications::Participation.new(notification("mention", type: "Issue")).reopens_while_open?
+    assert FetchGhNotifications::Participation.new(notification("mention", type: "Discussion")).reopens_while_open?
+    assert_not FetchGhNotifications::Participation.new(notification("mention", type: "Commit")).reopens_while_open?
+  end
+
   test "participation tags say how Mike is involved and whose repo it is" do
     assert_equal %w[mentioned oss], FetchGhNotifications::Participation.new(notification("mention", repo: "rails/rails")).tags
     assert_equal %w[review oss], FetchGhNotifications::Participation.new(notification("review_requested", repo: "rubysec/ruby-advisory-db")).tags
@@ -131,6 +138,7 @@ class FetchGhNotificationsTest < ActiveSupport::TestCase
     assert_equal "nokogiri: NONET bypass on JRuby", item.title
     assert_equal %w[oss security], item.tags
     assert item.golden?
+    assert_not item.reopens_while_open?
     assert_equal "done", item.mark
   end
 
@@ -207,11 +215,11 @@ class FetchGhNotificationsTest < ActiveSupport::TestCase
   end
 
   private
-    def notification(reason, repo: "rails/rails", path: "pulls/1", title: "Fix it")
+    def notification(reason, repo: "rails/rails", path: "pulls/1", title: "Fix it", type: "PullRequest")
       owner, name = repo.split("/")
       { "reason" => reason, "updated_at" => "2026-10-07T00:00:00Z",
         "repository" => { "name" => name, "full_name" => repo, "private" => owner == "basecamp", "owner" => { "login" => owner } },
-        "subject" => { "title" => title, "type" => "PullRequest", "url" => "https://api.github.com/repos/#{repo}/#{path}" } }
+        "subject" => { "title" => title, "type" => type, "url" => "https://api.github.com/repos/#{repo}/#{path}" } }
     end
 
     def advisory_notification(title, repo: "sparklemotion/nokogiri", reason: "subscribed", updated_at: "2026-10-05T14:14:39Z")

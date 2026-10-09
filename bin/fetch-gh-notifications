@@ -8,8 +8,8 @@
 # decides what each kind of card looks like. A notification whose artifact
 # already has a card (by its "ref" frontmatter, on any lane of the board) adds a
 # comment to that card instead, linking the latest GitHub comment when there is
-# one, and moves a Done card tagged "review" back to Next while its pull request
-# is open. Either way the notification is marked read, or done for an advisory,
+# one, and moves a Done card back to Next while its pull request, issue or
+# discussion is open. Either way the notification is marked read, or done for an advisory,
 # so it isn't processed again.
 #
 # Fizzy calls go through the `fizzy` CLI under a named profile, which decides
@@ -108,9 +108,9 @@ wanted.each do |n|
   if (existing = board.find(item))
     number  = existing["number"].to_s
     comment = item.activity_comment(latest_comment_html_url(n))
-    # A review card in Done comes back for the next round of review, unless
-    # the pull request has been merged or closed.
-    reactivate = existing["closed"] && existing["tags"].to_a.include?("review") && open?(n)
+    # A card in Done comes back while its pull request, issue or discussion
+    # is open.
+    reactivate = existing["closed"] && item.reopens_while_open? && open?(n)
 
     if DRY_RUN
       puts "would comment ##{number}: #{comment}"
@@ -136,7 +136,7 @@ wanted.each do |n|
       puts "carded ##{number}: #{item.title}"
     end
 
-    board.add(item, { "number" => number, "tags" => item.tags, "closed" => false })
+    board.add(item, { "number" => number, "closed" => false })
     count += 1
   end
 
