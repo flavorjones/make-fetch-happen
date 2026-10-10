@@ -41,28 +41,28 @@ class FetchGhNotificationsTest < ActiveSupport::TestCase
     later_row = %(<table><tbody><tr><td><p>rel</p></td><td><p><a href="https://github.com/a/b/issues/9">x</a></p></td></tr><tr><td><p>ref</p></td><td><p><a href="https://github.com/a/b/pull/4">x</a></p></td></tr></tbody></table>)
     text_only = %(<table><tbody><tr><th>ref</th><td>https://github.com/a/b/pull/5</td></tr></tbody></table>)
 
-    assert_equal [ "https://github.com/a/b/pull/1" ], FetchGhNotifications.frontmatter_refs(lexxy)
-    assert_equal [ "https://github.com/a/b/pull/2" ], FetchGhNotifications.frontmatter_refs(plain)
-    assert_equal [ "https://github.com/a/b/pull/3" ], FetchGhNotifications.frontmatter_refs(strong)
-    assert_equal [ "https://github.com/a/b/pull/4" ], FetchGhNotifications.frontmatter_refs(later_row)
-    assert_equal [ "https://github.com/a/b/pull/5" ], FetchGhNotifications.frontmatter_refs(text_only)
+    assert_equal [ "https://github.com/a/b/pull/1" ], FetchGhNotifications.frontmatter_urls(lexxy, "ref")
+    assert_equal [ "https://github.com/a/b/pull/2" ], FetchGhNotifications.frontmatter_urls(plain, "ref")
+    assert_equal [ "https://github.com/a/b/pull/3" ], FetchGhNotifications.frontmatter_urls(strong, "ref")
+    assert_equal [ "https://github.com/a/b/pull/4" ], FetchGhNotifications.frontmatter_urls(later_row, "ref")
+    assert_equal [ "https://github.com/a/b/pull/5" ], FetchGhNotifications.frontmatter_urls(text_only, "ref")
   end
 
   test "a card with several ref rows has every ref" do
     html = %(<table><tbody><tr><th>ref</th><td><a href="https://github.com/a/b/security/advisories/GHSA-1">x</a></td></tr><tr><th>ref</th><td><a href="https://github.com/a/b/security/advisories/GHSA-2">x</a></td></tr></tbody></table>)
 
-    assert_equal [ "https://github.com/a/b/security/advisories/GHSA-1", "https://github.com/a/b/security/advisories/GHSA-2" ], FetchGhNotifications.frontmatter_refs(html)
+    assert_equal [ "https://github.com/a/b/security/advisories/GHSA-1", "https://github.com/a/b/security/advisories/GHSA-2" ], FetchGhNotifications.frontmatter_urls(html, "ref")
   end
 
   test "a ref with http, a fragment or a trailing slash matches the bare artifact URL" do
     html = %(<table><tbody><tr><th>ref</th><td><a href="http://github.com/a/b/pull/1/#issuecomment-1">x</a></td></tr></tbody></table>)
 
-    assert_equal [ "https://github.com/a/b/pull/1" ], FetchGhNotifications.frontmatter_refs(html)
+    assert_equal [ "https://github.com/a/b/pull/1" ], FetchGhNotifications.frontmatter_urls(html, "ref")
   end
 
   test "a description without frontmatter has no refs" do
-    assert_empty FetchGhNotifications.frontmatter_refs(nil)
-    assert_empty FetchGhNotifications.frontmatter_refs("<p>just prose</p>")
+    assert_empty FetchGhNotifications.frontmatter_urls(nil, "ref")
+    assert_empty FetchGhNotifications.frontmatter_urls("<p>just prose</p>", "ref")
   end
 
   test "a participation cards the artifact it is about" do
@@ -90,7 +90,7 @@ class FetchGhNotificationsTest < ActiveSupport::TestCase
   test "a participation description refs the artifact and names the reason" do
     description = FetchGhNotifications::Participation.new(notification("mention", repo: "a/b", path: "pulls/1")).description
 
-    assert_equal [ "https://github.com/a/b/pull/1" ], FetchGhNotifications.frontmatter_refs(description)
+    assert_equal [ "https://github.com/a/b/pull/1" ], FetchGhNotifications.frontmatter_urls(description, "ref")
     assert_includes description, "GitHub notification reason: mention"
   end
 
@@ -184,6 +184,21 @@ class FetchGhNotificationsTest < ActiveSupport::TestCase
       advisory_notification("Mechanize sends credential headers to another host", repo: "sparklemotion/mechanize"), advisories))
   end
 
+  test "the board finds a card by its output" do
+    fix = card(659, "gliff: client memory grows", "https://github.com/omacom/gliff/issues/27", output: "https://github.com/omacom/gliff/pull/30")
+    board = FetchGhNotifications::Board.new([ fix ])
+
+    assert_equal fix, board.find(FetchGhNotifications::Participation.new(notification("mention", repo: "omacom/gliff", path: "pulls/30")))
+  end
+
+  test "the board prefers a card whose ref matches over one whose output matches" do
+    fix = card(659, "gliff: client memory grows", "https://github.com/omacom/gliff/issues/27", output: "https://github.com/omacom/gliff/pull/30")
+    review = card(662, "gliff: Fix a memory leak", "https://github.com/omacom/gliff/pull/30")
+    board = FetchGhNotifications::Board.new([ fix, review ])
+
+    assert_equal review, board.find(FetchGhNotifications::Participation.new(notification("mention", repo: "omacom/gliff", path: "pulls/30")))
+  end
+
   test "the board finds an advisory card by title when the advisory has no ref" do
     nokogiri = card(618, "nokogiri: NONET bypass on JRuby")
     board = FetchGhNotifications::Board.new([ nokogiri ])
@@ -234,8 +249,10 @@ class FetchGhNotificationsTest < ActiveSupport::TestCase
         "html_url" => "https://github.com/#{repo}/security/advisories/#{ghsa_id}" }
     end
 
-    def card(number, title, *refs)
-      rows = refs.map { %(<tr><th>ref</th><td><a href="#{it}">#{it}</a></td></tr>) }
+    def card(number, title, *refs, output: nil)
+      rows = [ *refs.map { [ "ref", it ] }, [ "output", output ] ].select(&:last).map do |key, url|
+        %(<tr><th>#{key}</th><td><a href="#{url}">#{url}</a></td></tr>)
+      end
       { "number" => number, "title" => title, "description_html" => "<table><tbody>#{rows.join}</tbody></table>" }
     end
 

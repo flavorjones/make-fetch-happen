@@ -6,9 +6,9 @@
 # Walks the unread notifications newest first and cards each mention, review
 # request, assignment and repository security advisory; lib/fetch_gh_notifications
 # decides what each kind of card looks like. A notification whose artifact
-# already has a card (by its "ref" frontmatter, on any lane of the board) adds a
-# comment to that card instead, linking the latest GitHub comment when there is
-# one, and moves a Done card back to Next while its pull request, issue or
+# already has a card (by its "ref" or "output" frontmatter, on any lane of the
+# board) adds a comment to that card instead, linking the latest GitHub comment
+# when there is one, and moves a Done card back to Next while its pull request, issue or
 # discussion is open. Either way the notification is marked read, or done for an advisory,
 # so it isn't processed again.
 #

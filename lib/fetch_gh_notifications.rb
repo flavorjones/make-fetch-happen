@@ -52,12 +52,12 @@ module FetchGhNotifications
       .sub(%r{/commits/(\h+)\z}, '/commit/\1')
   end
 
-  # Cards on the board were written by hand and by several scripts, so the ref
-  # row comes in more than one shape.
-  def frontmatter_refs(description_html)
+  # Cards on the board were written by hand and by several scripts, so a
+  # frontmatter row comes in more than one shape.
+  def frontmatter_urls(description_html, key)
     Nokogiri::HTML5.fragment(description_html.to_s).css("tr").filter_map do |row|
-      key, value = row.css("th, td")
-      next unless key&.text&.strip == "ref" && value
+      name, value = row.css("th, td")
+      next unless name&.text&.strip == key && value
 
       url = value.at_css("a")&.[]("href") || value.text
       url.strip.sub(/\Ahttp:/, "https:").sub(/#.*\z/, "").chomp("/")
@@ -139,13 +139,18 @@ module FetchGhNotifications
     end
   end
 
-  # The cards already on the board, found by their refs and titles.
+  # The cards already on the board, found by their refs, outputs and titles.
   class Board
+    # A "ref" match beats an "output" match: the pull request one card tracks
+    # as its output can also have its own card from a review request.
     def initialize(cards)
       @cards = {}
-      cards.each do |card|
-        [ *FetchGhNotifications.frontmatter_refs(card["description_html"]), card["title"] ].each { @cards[it] ||= card }
+      %w[ref output].each do |key|
+        cards.each do |card|
+          FetchGhNotifications.frontmatter_urls(card["description_html"], key).each { @cards[it] ||= card }
+        end
       end
+      cards.each { @cards[it["title"]] ||= it }
     end
 
     def find(item)
