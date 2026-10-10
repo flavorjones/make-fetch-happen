@@ -136,7 +136,10 @@ Without it, `fizzy` acts as Mike.
   request. Use the `consult-outside-expert` skill. Give the reviewer the real
   diff against the merge base, the commit message and the PR text, framed as an
   invariant to test, and tell it which dependency versions CI installs so it
-  tests against those, not the worktree's lockfile.
+  tests against those, not the worktree's lockfile. Ask it also to read the
+  commit message and PR text as an expert in this code would, and to point out
+  any sentence that misuses the code's own terms or that such a reader would
+  have to read twice.
 
   A push that changes only docs, code comments, the CHANGELOG, the commit
   message or the PR text needs no review unless explicitly instructed. That
