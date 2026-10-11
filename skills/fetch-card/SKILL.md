@@ -88,6 +88,32 @@ Common tags:
 - "37signals" for work-related (every card on the 37signals board)
 - "security" for security-related
 - "review" for requests for review (as in a pull request)
+- "p/<project_name>" for the project, one per project in the title
+
+### Project tags
+
+Every card carries a "p/" tag for each project named in its title, so that filtering by
+tag finds all of a project's cards. Search can't do this: "sqlite3" matches Rails cards
+about SQLite, and "sqlite3-ruby" matches "sqlite3" or "ruby". The tag is the project name
+defined above, the repository name, even where an older title uses another spelling: a
+"bc5:" card is `p/bc3`, a "HEY:" card is `p/haystack`.
+
+| Title | Tags |
+|---|---|
+| `rails: Invoke .focus() on <trix-editor>` | `p/rails` |
+| `rails-html-sanitizer and loofah: ReDoS in SVG sanitization` | `p/rails-html-sanitizer`, `p/loofah` |
+| `sqlite3-ruby: Initial Ractor support` | `p/sqlite3-ruby` |
+
+The title keeps its project prefix too, because notifications show the title and not the
+tags. When a card's title changes project, change its "p/" tags to match.
+
+`fizzy card tag` toggles: on a card that already has the tag, it removes it. Read the
+card's tags first and tag only what is missing:
+
+```bash
+fizzy card show N --jq '.data.tags'
+fizzy card tag N --tag p/nokogiri
+```
 
 ## Frontmatter
 

@@ -86,7 +86,7 @@ module FetchGhNotifications
       tags = [ REASON_TAGS.fetch(notification["reason"]) ]
       tags << "oss" unless notification.dig("repository", "private")
       tags << "37signals" if notification.dig("repository", "owner", "login") == "basecamp"
-      tags
+      tags << "p/#{notification.dig("repository", "name")}"
     end
 
     def description
@@ -117,7 +117,7 @@ module FetchGhNotifications
 
     def title = "#{notification.dig("repository", "name")}: #{notification.dig("subject", "title")}"
     def ref = advisory&.fetch("html_url")
-    def tags = %w[oss security]
+    def tags = [ "oss", "security", "p/#{notification.dig("repository", "name")}" ]
     def golden? = true
     def reopens_while_open? = false
     def mark = "done"

@@ -81,10 +81,10 @@ class FetchGhNotificationsTest < ActiveSupport::TestCase
     assert_not FetchGhNotifications::Participation.new(notification("mention", type: "Commit")).reopens_while_open?
   end
 
-  test "participation tags say how Mike is involved and whose repo it is" do
-    assert_equal %w[mentioned oss], FetchGhNotifications::Participation.new(notification("mention", repo: "rails/rails")).tags
-    assert_equal %w[review oss], FetchGhNotifications::Participation.new(notification("review_requested", repo: "rubysec/ruby-advisory-db")).tags
-    assert_equal %w[assigned 37signals], FetchGhNotifications::Participation.new(notification("assign", repo: "basecamp/launchpad")).tags
+  test "participation tags say how Mike is involved, whose repo it is, and the project" do
+    assert_equal %w[mentioned oss p/rails], FetchGhNotifications::Participation.new(notification("mention", repo: "rails/rails")).tags
+    assert_equal %w[review oss p/ruby-advisory-db], FetchGhNotifications::Participation.new(notification("review_requested", repo: "rubysec/ruby-advisory-db")).tags
+    assert_equal %w[assigned 37signals p/launchpad], FetchGhNotifications::Participation.new(notification("assign", repo: "basecamp/launchpad")).tags
   end
 
   test "a participation description refs the artifact and names the reason" do
@@ -136,7 +136,7 @@ class FetchGhNotificationsTest < ActiveSupport::TestCase
     item = FetchGhNotifications::Advisory.for(advisory_notification("NONET bypass on JRuby"), [])
 
     assert_equal "nokogiri: NONET bypass on JRuby", item.title
-    assert_equal %w[oss security], item.tags
+    assert_equal %w[oss security p/nokogiri], item.tags
     assert item.golden?
     assert_not item.reopens_while_open?
     assert_equal "done", item.mark

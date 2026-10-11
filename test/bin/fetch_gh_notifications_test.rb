@@ -23,7 +23,7 @@ class FetchGhNotificationsScriptTest < ActiveSupport::TestCase
     create = fizzy_calls("card", "create").sole
     assert_equal "rails: Stop setting the ACL", argument(create, "--title")
     assert_includes argument(create, "--description"), %(href="https://github.com/rails/rails/pull/58781")
-    assert_equal %w[mentioned oss], fizzy_calls("card", "tag").map { argument(it, "--tag") }
+    assert_equal %w[mentioned oss p/rails], fizzy_calls("card", "tag").map { argument(it, "--tag") }
     assert_equal [ "/notifications/threads/41" ], marked_read
   end
 
@@ -161,7 +161,7 @@ class FetchGhNotificationsScriptTest < ActiveSupport::TestCase
       notification("42", "review_requested", "rails/rails", "pulls/1", "Fix it", updated_at: "2026-10-07T00:00:00Z")
 
     assert_equal 1, fizzy_calls("card", "create").size
-    assert_equal %w[review oss], fizzy_calls("card", "tag").map { argument(it, "--tag") }
+    assert_equal %w[review oss p/rails], fizzy_calls("card", "tag").map { argument(it, "--tag") }
     assert_equal [ [ "700", "New GitHub activity on a thread that mentions you." ] ], fizzy_calls("comment", "create").map { [ argument(it, "--card"), argument(it, "--body") ] }
     assert_equal %w[/notifications/threads/42 /notifications/threads/41], marked_read
   end
@@ -183,7 +183,7 @@ class FetchGhNotificationsScriptTest < ActiveSupport::TestCase
     create = fizzy_calls("card", "create").sole
     assert_equal "nokogiri: NONET bypass on JRuby", argument(create, "--title")
     assert_includes argument(create, "--description"), %(href="https://github.com/sparklemotion/nokogiri/security/advisories/GHSA-bbbb")
-    assert_equal %w[oss security], fizzy_calls("card", "tag").map { argument(it, "--tag") }
+    assert_equal %w[oss security p/nokogiri], fizzy_calls("card", "tag").map { argument(it, "--tag") }
     assert_equal [ %w[card golden 700] ], fizzy_calls("card", "golden").map { it.first(3) }
     assert_equal [ "/notifications/threads/43" ], marked_done
     assert_empty marked_read
