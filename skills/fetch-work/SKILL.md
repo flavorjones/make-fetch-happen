@@ -74,11 +74,14 @@ Without it, `fizzy` acts as Mike.
    toggle a file, edit it in place and restore with `git checkout -- <path>`,
    and only for a file with none of your uncommitted work in it.
 
-5. **Move the card** when the work moves (fetch-card): an instruction to
-   research moves it to Researching; an instruction to change code moves it to
-   In Progress; work waiting on Mike's review stays In Progress; work waiting on
-   someone else goes to In Review with an "output" row. Never move a card out
-   of Maybe? on your own.
+5. **Move the card before you start the work** (fetch-card). Mike's instruction
+   to do work is the decision to start, so it moves the card from any column,
+   Maybe? included. An instruction to find something out goes to Researching.
+   An instruction to produce outputs (code, cards, comments, commits, replies)
+   goes to In Progress. A question or a status request does not move the card.
+   Work waiting on Mike's review stays In Progress; work waiting on someone else
+   goes to In Review with an "output" row. Without an instruction from Mike,
+   never move a card out of Maybe?.
 
 6. **Do the work.**
    - A question gets an answer with evidence: commands run, shas, links. Do the
