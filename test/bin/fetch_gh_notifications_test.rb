@@ -27,6 +27,33 @@ class FetchGhNotificationsScriptTest < ActiveSupport::TestCase
     assert_equal [ "/notifications/threads/41" ], marked_read
   end
 
+  test "a merged or closed pull request, issue or discussion without a card is skipped, and is marked read" do
+    @states["https://api.github.com/repos/rails/rails/pulls/58781"] = "closed"
+    @states["https://api.github.com/repos/rails/rails/issues/55881"] = "closed"
+    @states["https://api.github.com/repos/basecamp/hotcell/discussions/107"] = "closed"
+
+    output = run_script \
+      notification("41", "review_requested", "rails/rails", "pulls/58781", "Stop setting the ACL"),
+      notification("42", "mention", "rails/rails", "issues/55881", "Flaky test", type: "Issue"),
+      notification("43", "mention", "basecamp/hotcell", "discussions/107", "Using a Docker Cell", type: "Discussion")
+
+    assert_empty fizzy_calls("card", "create")
+    assert_match %r{already closed, skipping.*https://github.com/rails/rails/pull/58781}, output
+    assert_match %r{already closed, skipping.*https://github.com/rails/rails/issues/55881}, output
+    assert_match %r{already closed, skipping.*https://github.com/basecamp/hotcell/discussions/107}, output
+    assert_equal %w[/notifications/threads/41 /notifications/threads/42 /notifications/threads/43], marked_read.sort
+  end
+
+  test "an open pull request without a card, or one whose state can't be read, gets a card" do
+    @states["https://api.github.com/repos/rails/rails/pulls/1"] = "open"
+
+    run_script \
+      notification("41", "mention", "rails/rails", "pulls/1", "Open"),
+      notification("42", "mention", "rails/rails", "pulls/404", "Unreadable")
+
+    assert_equal [ "rails: Open", "rails: Unreadable" ], fizzy_calls("card", "create").map { argument(it, "--title") }.sort
+  end
+
   test "the script says what it is reading" do
     @lanes["all"] << card("https://github.com/rails/rails/pull/1")
 

@@ -9,8 +9,9 @@
 # already has a card (by its "ref" or "output" frontmatter, on any lane of the
 # board) adds a comment to that card instead, linking the latest GitHub comment
 # when there is one, and moves a Done card back to Next while its pull request, issue or
-# discussion is open. Either way the notification is marked read, or done for an advisory,
-# so it isn't processed again.
+# discussion is open. A closed pull request, issue or discussion without a card is skipped.
+# Either way the notification is marked read, or done for an advisory, so it isn't
+# processed again.
 #
 # Fizzy calls go through the `fizzy` CLI under a named profile, which decides
 # the account and the credentials. Override with --profile and --board.
@@ -89,11 +90,10 @@ rescue => e
   warn "could not read #{url}: #{e.message}"
 end
 
-def open?(notification)
-  gh_api(notification.dig("subject", "url"))["state"] == "open"
+def state(notification)
+  gh_api(notification.dig("subject", "url"))["state"]
 rescue => e
   warn "could not read #{notification.dig("subject", "url")}: #{e.message}"
-  false
 end
 
 def next_column_id
@@ -110,7 +110,7 @@ wanted.each do |n|
     comment = item.activity_comment(latest_comment_html_url(n))
     # A card in Done comes back while its pull request, issue or discussion
     # is open.
-    reactivate = existing["closed"] && item.reopens_while_open? && open?(n)
+    reactivate = existing["closed"] && item.reopens_while_open? && state(n) == "open"
 
     if DRY_RUN
       puts "would comment ##{number}: #{comment}"
@@ -124,6 +124,8 @@ wanted.each do |n|
         puts "moved ##{number} to Next"
       end
     end
+  elsif item.reopens_while_open? && state(n) == "closed"
+    puts "already closed, skipping #{item.title} (#{item.ref})"
   else
     if DRY_RUN
       puts "would card [#{item.tags.join(",")}]#{" golden" if item.golden?} #{item.title} (#{item.ref})"
