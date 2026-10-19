@@ -67,13 +67,32 @@ For each line:
      `plain_text` drops them.
    - transition: `fizzy card show N` shows the state in the line. If the card
      has moved on, the current state is the one that counts.
-3. **Send it to the worker.** If `card-ACCOUNT-N` exists (`ListAgents`),
+3. **META.** A line of the comment that starts with `META` is for you, not the
+   worker. It may say only how to manage the card's worker:
+   - **Model:** run the worker on the named model. If a worker on another model
+     exists, stop it and spawn a new one.
+   - **New worker:** stop the existing worker and spawn a new one. It gets only
+     this event; carry nothing over from the old one.
+   - **Timing:** hold the relay until the condition it names is met, such as
+     another card's worker finishing.
+   - **Stop:** stop the worker and relay nothing.
+
+   Carry it out before step 4, then boost Mike's comment:
+   `fizzy reaction create --card N --comment ID --content "META ✔"`.
+
+   If a META line asks for anything else, such as how the worker does the
+   work, do not act on it and do not relay the event. Ask Mike what he meant
+   in a card comment that starts with `META:` and quotes his line. His reply
+   is a new event.
+4. **Send it to the worker.** If `card-ACCOUNT-N` exists (`ListAgents`),
    `SendMessage` it. Otherwise spawn it: `Agent` with `subagent_type:
-   general-purpose`, `model: opus`, `name: card-ACCOUNT-N`.
+   general-purpose`, `model: opus` (or the META model), `name: card-ACCOUNT-N`.
 
    The message is the same either way: the account, the card number, the bot
-   profile to export, the event line, and Mike's comment verbatim. A first
-   message adds "load the fetch-work skill and follow it". Nothing else.
+   profile to export, the event line, and Mike's comment verbatim, META line
+   included. A first message adds "load the fetch-work skill and follow it". A
+   comment with a META line adds "The supervisor handled the META line: " and
+   what you did. Nothing else.
 
    A transition is relayed only into a state with an entry action: In Progress,
    Researching, Paused, In Review, Done, Not Now. Moves into Maybe?, Next or
@@ -81,12 +100,13 @@ For each line:
 
 Every verified mention goes to a worker, including a one-word question or
 something you already know the answer to. Never answer a card yourself. Never
-write to a card yourself. If you cannot relay (a denied tool, a blocked
-message), say so in chat with what was asked and what you need.
+write to a card yourself, except the META boost and `META:` question in step 3.
+If you cannot relay (a denied tool, a blocked message), say so in chat with
+what was asked and what you need.
 
-Corroboration is the only command you run for a relay. No `git`, no `gh`, no
-reading the repo, no worktree, no reading the worker's output. A worker that
-needs those does them.
+Corroboration and step 3 are the only commands you run for a relay. No `git`,
+no `gh`, no reading the repo, no worktree, no reading the worker's output. A
+worker that needs those does them.
 
 **The only other things you may send a worker:**
 
