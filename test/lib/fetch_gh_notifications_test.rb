@@ -142,6 +142,25 @@ class FetchGhNotificationsTest < ActiveSupport::TestCase
     assert_equal "done", item.mark
   end
 
+  test "a title longer than Fizzy allows is cut to 255 characters" do
+    long = "x" * 300
+
+    [
+      FetchGhNotifications::Participation.new(notification("mention", title: long)),
+      FetchGhNotifications::Advisory.for(advisory_notification(long), [])
+    ].each do |item|
+      assert_equal 255, item.title.length
+      assert item.title.end_with?("x…")
+    end
+  end
+
+  test "the board finds an advisory card by a cut title" do
+    item = FetchGhNotifications::Advisory.for(advisory_notification("x" * 300), [])
+    board = FetchGhNotifications::Board.new([ card(1, item.title) ])
+
+    assert_equal 1, board.find(item)["number"]
+  end
+
   test "an advisory description refs the advisory and rels the security page" do
     advisories = [ advisory("GHSA-bbbb", "NONET bypass on JRuby", "2026-10-05T14:14:05Z") ]
 

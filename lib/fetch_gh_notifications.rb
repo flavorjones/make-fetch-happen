@@ -64,6 +64,14 @@ module FetchGhNotifications
     end
   end
 
+  # Fizzy answers a longer title with a 500.
+  TITLE_LIMIT = 255
+
+  def title(notification)
+    title = "#{notification.dig("repository", "name")}: #{notification.dig("subject", "title")}"
+    title.length > TITLE_LIMIT ? "#{title[0, TITLE_LIMIT - 1]}…" : title
+  end
+
   def frontmatter(rows)
     cells = rows.map do |key, url|
       url = CGI.escapeHTML(url)
@@ -75,7 +83,7 @@ module FetchGhNotifications
   # A mention, review request or assignment on an issue, pull request,
   # discussion or commit.
   Participation = Data.define(:notification) do
-    def title = "#{notification.dig("repository", "name")}: #{notification.dig("subject", "title")}"
+    def title = FetchGhNotifications.title(notification)
     def ref = FetchGhNotifications.web_url(notification.dig("subject", "url"))
     def keys = [ ref ]
     def golden? = false
@@ -115,7 +123,7 @@ module FetchGhNotifications
       new(notification:, advisory:)
     end
 
-    def title = "#{notification.dig("repository", "name")}: #{notification.dig("subject", "title")}"
+    def title = FetchGhNotifications.title(notification)
     def ref = advisory&.fetch("html_url")
     def tags = [ "oss", "security", "p/#{notification.dig("repository", "name")}" ]
     def golden? = true
