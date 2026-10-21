@@ -49,7 +49,8 @@ end
 def fizzy(*args)
   command = [ "fizzy", *args, "--quiet", "--profile", PROFILE ]
   stdout, stderr, status = Open3.capture3(*command)
-  raise "`#{command.join(" ")}` failed: #{stderr.strip}" unless status.success?
+  # The CLI prints an API error to stdout, not stderr.
+  raise "`#{command.join(" ")}` failed: #{[ stderr, stdout ].map(&:strip).reject(&:empty?).join("\n")}" unless status.success?
   parsed = JSON.parse(stdout)
   parsed.is_a?(Hash) ? parsed.fetch("data", parsed) : parsed
 end

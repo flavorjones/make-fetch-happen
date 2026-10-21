@@ -258,6 +258,14 @@ class FetchGhNotificationsScriptTest < ActiveSupport::TestCase
     assert_equal 1, calls("gh").count { it.last.include?("/security-advisories") }
   end
 
+  test "a failed fizzy call shows the error fizzy printed" do
+    @fizzy_error = { code: "api_error", error: "Server error (500)", ok: false }
+
+    output = run_script notification("41", "mention", "rails/rails", "pulls/1", "Fix it"), success: false
+
+    assert_match(/failed: .*Server error \(500\)/, output)
+  end
+
   test "a dry run creates, comments, moves and marks nothing" do
     @lanes["closed"] << card("https://github.com/rails/rails/pull/2", tags: %w[review], closed: true)
     @states["https://api.github.com/repos/rails/rails/pulls/2"] = "open"
@@ -301,11 +309,12 @@ class FetchGhNotificationsScriptTest < ActiveSupport::TestCase
       { "number" => number, "title" => title, "tags" => tags, "closed" => closed, "description_html" => FetchGhNotifications.frontmatter([ [ "ref", ref ] ]) }
     end
 
-    def run_script(*notifications, args: [])
+    def run_script(*notifications, args: [], success: true)
       File.write(@dir.join("notifications.json"), [ notifications ].to_json)
       @lanes.each { |lane, cards| File.write(@dir.join("cards-#{lane}.json"), { data: cards }.to_json) }
       File.write(@dir.join("comments.json"), @comments.to_json)
       File.write(@dir.join("states.json"), @states.to_json)
+      File.write(@dir.join("fizzy-error.json"), @fizzy_error.to_json) if @fizzy_error
       @advisories.each { |repo, list| File.write(@dir.join("advisories-#{repo.tr("/", "_")}.json"), [ list ].to_json) }
       fake("gh", <<~'RUBY')
         if ARGV.include?("PATCH") || ARGV.include?("DELETE") then exit
@@ -325,6 +334,9 @@ class FetchGhNotificationsScriptTest < ActiveSupport::TestCase
         if ARGV.first(2) == %w[card list]
           path = File.join(DIR, "cards-#{ARGV[ARGV.index("--indexed-by") + 1]}.json")
           print File.exist?(path) ? File.read(path) : { data: [] }.to_json
+        elsif ARGV.first(2) == %w[card create] && File.exist?(error = File.join(DIR, "fizzy-error.json"))
+          print File.read(error)
+          exit 7
         elsif ARGV.first(2) == %w[card create] then print({ data: { number: 700 } }.to_json)
         elsif ARGV.first(2) == %w[column list] then print({ data: [ { id: "col-next", name: "Next" }, { id: "col-ip", name: "In Progress" } ] }.to_json)
         else print({ data: {} }.to_json)
@@ -333,7 +345,7 @@ class FetchGhNotificationsScriptTest < ActiveSupport::TestCase
 
       env = { "PATH" => "#{@dir}:#{ENV["PATH"]}" }
       output, status = Open3.capture2e(env, Rails.root.join("bin", "fetch-gh-notifications").to_s, *args)
-      assert status.success?, output
+      assert_equal success, status.success?, output
       output
     end
 
