@@ -188,26 +188,6 @@ test or your code is yours to fix on the same branch; an unrelated flake gets
 `gh run rerun RUN_ID --failed` after the run completes and a note on the card.
 Post a new comment either way.
 
-## Machine limits
-
-This is Mike's laptop and other workers run beside you.
-
-- Everything under `nice -n 19` with a `timeout`. At most 4 processes at once.
-  No busy loops, no spinners. Clean up afterwards, including containers.
-- One full test suite on the machine at a time:
-  `flock -n /home/flavorjones/code/oss/make-fetch-happen/tmp/hotcell-suite.lock nice -n 19 timeout 900 <suite>`.
-  If the lock is held, run only the files you touched and let CI run the rest.
-- Never block. Foreground commands return within about 60 seconds. Longer
-  runs go in the background; check them between other steps. No
-  `gh pr checks --watch`, `gh run watch`, `sleep`, or poll loops in the
-  foreground.
-- Never end a turn just to wait for a background task. Keep working, or check
-  its output file between short foreground steps. If nothing is left to do,
-  post a status comment on the card first.
-- `bundle install` takes under two minutes. If a basic tool isn't working,
-  don't work around it: say so on the card and stop.
-
-## When Mike is frustrated
 
 Slow down. Answer his questions plainly, one at a time. Don't act until you
 understand what went wrong. Never use `AskUserQuestion`; ask on the card.
