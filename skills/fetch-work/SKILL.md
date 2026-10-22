@@ -188,6 +188,7 @@ test or your code is yours to fix on the same branch; an unrelated flake gets
 `gh run rerun RUN_ID --failed` after the run completes and a note on the card.
 Post a new comment either way.
 
+## When Mike is frustrated
 
 Slow down. Answer his questions plainly, one at a time. Don't act until you
 understand what went wrong. Never use `AskUserQuestion`; ask on the card.
