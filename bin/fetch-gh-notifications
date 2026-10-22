@@ -101,7 +101,18 @@ def next_column_id
   @next_column_id ||= fizzy("column", "list", "--board", BOARD).find { |c| c["name"] == "Next" }.fetch("id")
 end
 
+# An OSC-8 hyperlink, which a terminal shows as the card number.
+def card_link(card)
+  number = "##{card["number"]}"
+  card["url"] ? "\e]8;;#{card["url"]}\e\\#{number}\e]8;;\e\\" : number
+end
+
+def report(action, tags, text)
+  puts "#{FetchGhNotifications.emojis(action, Array(tags))} #{text}"
+end
+
 count = 0
+puts
 
 wanted.each do |n|
   item = FetchGhNotifications.route(n, advisories) or next
@@ -113,37 +124,37 @@ wanted.each do |n|
     # is open.
     reactivate = existing["closed"] && item.reopens_while_open? && state(n) == "open"
 
-    if DRY_RUN
-      puts "would comment ##{number}: #{comment}"
-      puts "would move ##{number} to Next" if reactivate
-    else
+    unless DRY_RUN
       fizzy("comment", "create", "--card", number, "--body", comment)
-      puts "commented ##{number}: #{comment}"
-      if reactivate
-        fizzy("card", "column", number, "--column", next_column_id)
-        existing["closed"] = false
-        puts "moved ##{number} to Next"
-      end
+      fizzy("card", "column", number, "--column", next_column_id) if reactivate
+    end
+    existing["closed"] = false if reactivate
+
+    link = card_link(existing)
+    if reactivate
+      report :reactivated, existing["tags"], DRY_RUN ? "would move #{link} to Next and comment: #{comment}" : "moved #{link} to Next and commented: #{comment}"
+    else
+      report :bumped, existing["tags"], DRY_RUN ? "would comment #{link}: #{comment}" : "commented #{link}: #{comment}"
     end
   elsif item.reopens_while_open? && state(n) == "closed"
-    puts "already closed, skipping #{item.title} (#{item.ref})"
+    report :ignored, item.tags, "already closed, skipping #{item.title} (#{item.ref})"
   else
     if DRY_RUN
-      puts "would card [#{item.tags.join(",")}]#{" golden" if item.golden?} #{item.title} (#{item.ref})"
-      number = "new"
+      card = { "number" => "new" }
+      report :new, item.tags, "would card [#{item.tags.join(",")}]#{" golden" if item.golden?} #{item.title} (#{item.ref})"
     else
       card = fizzy("card", "create", "--board", BOARD, "--title", item.title, "--description", item.description)
-      number = card["number"].to_s
-      item.tags.each { |tag| fizzy("card", "tag", number, "--tag", tag) }
-      fizzy("card", "golden", number) if item.golden?
-      puts "carded ##{number}: #{item.title}"
+      item.tags.each { |tag| fizzy("card", "tag", card["number"].to_s, "--tag", tag) }
+      fizzy("card", "golden", card["number"].to_s) if item.golden?
+      report :new, item.tags, "carded #{card_link(card)}: #{item.title}"
     end
 
-    board.add(item, { "number" => number, "closed" => false })
+    board.add(item, { "number" => card["number"], "url" => card["url"], "tags" => item.tags, "closed" => false })
     count += 1
   end
 
   gh_api("-X", MARKS.fetch(item.mark), "/notifications/threads/#{n["id"]}") unless DRY_RUN
 end
 
+puts
 puts "done (#{count} #{DRY_RUN ? "would be carded" : "carded"})"

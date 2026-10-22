@@ -31,7 +31,24 @@ module FetchGhNotifications
     "assign"       => "The report was assigned to you."
   }.freeze
 
+  ACTION_EMOJIS = {
+    new:         "✨",
+    bumped:      "⏫",
+    reactivated: "🔙",
+    ignored:     "🫟"
+  }.freeze
+
+  TAG_EMOJIS = {
+    "security"  => "🔒",
+    "review"    => "👀",
+    "mentioned" => "💬"
+  }.freeze
+
   module_function
+
+  def emojis(action, tags)
+    ACTION_EMOJIS.fetch(action) + TAG_EMOJIS.filter_map { |tag, emoji| emoji if tags.include?(tag) }.join
+  end
 
   # `advisories` maps a repo's full name to its security advisories, and is
   # read only for advisory notifications.

@@ -284,6 +284,91 @@ class FetchGhNotificationsScriptTest < ActiveSupport::TestCase
     assert_empty marked_done
   end
 
+  test "a blank line sets the action lines apart from the reading lines and the summary" do
+    @states["https://api.github.com/repos/rails/rails/pulls/1"] = "open"
+
+    output = run_script notification("41", "mention", "rails/rails", "pulls/1", "Fix it")
+
+    reading, actions, summary = output.split("\n\n")
+    assert_match(/\Areading open cards/, reading)
+    assert_equal 1, actions.lines.size
+    assert_match(/\Adone/, summary)
+  end
+
+  test "each handled notification prints one line, led by an emoji for what happened to its card" do
+    @lanes["all"] << card("https://github.com/rails/rails/pull/2", number: 602)
+    @lanes["closed"] << card("https://github.com/rails/rails/pull/3", number: 603, closed: true)
+    @states["https://api.github.com/repos/rails/rails/pulls/1"] = "open"
+    @states["https://api.github.com/repos/rails/rails/pulls/3"] = "open"
+    @states["https://api.github.com/repos/rails/rails/pulls/4"] = "closed"
+
+    output = run_script \
+      notification("41", "mention", "rails/rails", "pulls/1", "New", updated_at: "2026-10-07T00:00:04Z"),
+      notification("42", "mention", "rails/rails", "pulls/2", "Bumped", updated_at: "2026-10-07T00:00:03Z"),
+      notification("43", "mention", "rails/rails", "pulls/3", "Reactivated", updated_at: "2026-10-07T00:00:02Z"),
+      notification("44", "mention", "rails/rails", "pulls/4", "Ignored", updated_at: "2026-10-07T00:00:01Z")
+
+    assert_equal %w[✨ ⏫ 🔙 🫟], action_lines(output).map { it.split(" ").first.delete("💬") }
+  end
+
+  test "a dry run prints one line per handled notification too" do
+    @lanes["all"] << card("https://github.com/rails/rails/pull/2", number: 602)
+    @lanes["closed"] << card("https://github.com/rails/rails/pull/3", number: 603, closed: true)
+    @states["https://api.github.com/repos/rails/rails/pulls/1"] = "open"
+    @states["https://api.github.com/repos/rails/rails/pulls/3"] = "open"
+    @states["https://api.github.com/repos/rails/rails/pulls/4"] = "closed"
+
+    output = run_script \
+      notification("41", "mention", "rails/rails", "pulls/1", "New", updated_at: "2026-10-07T00:00:04Z"),
+      notification("42", "mention", "rails/rails", "pulls/2", "Bumped", updated_at: "2026-10-07T00:00:03Z"),
+      notification("43", "mention", "rails/rails", "pulls/3", "Reactivated", updated_at: "2026-10-07T00:00:02Z"),
+      notification("44", "mention", "rails/rails", "pulls/4", "Ignored", updated_at: "2026-10-07T00:00:01Z"),
+      args: [ "--dry-run" ]
+
+    assert_equal %w[✨ ⏫ 🔙 🫟], action_lines(output).map { it.split(" ").first.delete("💬") }
+  end
+
+  test "the action emoji is followed by an emoji for each security, review or mentioned tag" do
+    @lanes["all"] << card("https://github.com/rails/rails/pull/2", number: 602, tags: %w[security review oss])
+    @states["https://api.github.com/repos/rails/rails/pulls/1"] = "open"
+    @states["https://api.github.com/repos/rails/rails/pulls/3"] = "open"
+    @advisories["sparklemotion/nokogiri"] = [ advisory("sparklemotion/nokogiri", "GHSA-bbbb", "NONET bypass on JRuby") ]
+
+    output = run_script \
+      notification("41", "mention", "rails/rails", "pulls/1", "Mentioned", updated_at: "2026-10-07T00:00:03Z"),
+      notification("42", "mention", "rails/rails", "pulls/2", "Tagged by hand", updated_at: "2026-10-07T00:00:02Z"),
+      notification("43", "assign", "rails/rails", "pulls/3", "Assigned", updated_at: "2026-10-07T00:00:01Z"),
+      advisory_notification("44", "sparklemotion/nokogiri", "NONET bypass on JRuby", "subscribed")
+
+    assert_equal %w[✨💬 ⏫🔒👀 ✨ ✨🔒], action_lines(output).map { it.split(" ").first }
+  end
+
+  test "a card number links to the card" do
+    @lanes["all"] << card("https://github.com/rails/rails/pull/2", number: 602)
+    @states["https://api.github.com/repos/rails/rails/pulls/1"] = "open"
+
+    output = run_script \
+      notification("41", "mention", "rails/rails", "pulls/1", "New", updated_at: "2026-10-07T00:00:02Z"),
+      notification("42", "mention", "rails/rails", "pulls/1", "New", updated_at: "2026-10-07T00:00:01Z"),
+      notification("43", "mention", "rails/rails", "pulls/2", "Bumped")
+
+    links = action_lines(output).map { it[/\e\]8;;.*?\e\]8;;\e\\/] }
+    assert_equal [ "\e]8;;https://app.fizzy.do/6097036/cards/700\e\\#700\e]8;;\e\\" ] * 2 +
+      [ "\e]8;;https://app.fizzy.do/6097036/cards/602\e\\#602\e]8;;\e\\" ], links
+  end
+
+  test "a dry run bumps a card it would already have moved to Next" do
+    @lanes["closed"] << card("https://github.com/rails/rails/pull/58781", number: 600, closed: true)
+    @states["https://api.github.com/repos/rails/rails/pulls/58781"] = "open"
+
+    output = run_script \
+      notification("41", "review_requested", "rails/rails", "pulls/58781", "Stop setting the ACL", updated_at: "2026-10-07T00:00:00Z"),
+      notification("42", "mention", "rails/rails", "pulls/58781", "Stop setting the ACL", updated_at: "2026-10-06T00:00:00Z"),
+      args: [ "--dry-run" ]
+
+    assert_equal %w[🔙 ⏫], action_lines(output).map { it.split(" ").first }
+  end
+
   private
     def notification(id, reason, repo, path, title, type: "PullRequest", updated_at: "2026-10-07T00:00:00Z", latest_comment_url: nil)
       owner, name = repo.split("/")
@@ -306,7 +391,8 @@ class FetchGhNotificationsScriptTest < ActiveSupport::TestCase
     end
 
     def card(ref, number: 600, title: "rails: Some card", tags: [], closed: false)
-      { "number" => number, "title" => title, "tags" => tags, "closed" => closed, "description_html" => FetchGhNotifications.frontmatter([ [ "ref", ref ] ]) }
+      { "number" => number, "url" => "https://app.fizzy.do/6097036/cards/#{number}", "title" => title, "tags" => tags, "closed" => closed,
+        "description_html" => FetchGhNotifications.frontmatter([ [ "ref", ref ] ]) }
     end
 
     def run_script(*notifications, args: [], success: true)
@@ -337,7 +423,7 @@ class FetchGhNotificationsScriptTest < ActiveSupport::TestCase
         elsif ARGV.first(2) == %w[card create] && File.exist?(error = File.join(DIR, "fizzy-error.json"))
           print File.read(error)
           exit 7
-        elsif ARGV.first(2) == %w[card create] then print({ data: { number: 700 } }.to_json)
+        elsif ARGV.first(2) == %w[card create] then print({ data: { number: 700, url: "https://app.fizzy.do/6097036/cards/700" } }.to_json)
         elsif ARGV.first(2) == %w[column list] then print({ data: [ { id: "col-next", name: "Next" }, { id: "col-ip", name: "In Progress" } ] }.to_json)
         else print({ data: {} }.to_json)
         end
@@ -375,6 +461,10 @@ class FetchGhNotificationsScriptTest < ActiveSupport::TestCase
 
     def marked_done
       calls("gh").select { it.include?("DELETE") }.map(&:last)
+    end
+
+    def action_lines(output)
+      output.split("\n\n")[1].lines
     end
 
     def argument(call, flag)
